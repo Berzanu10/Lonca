@@ -14,12 +14,13 @@
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: 'Segoe UI', sans-serif; background-color: var(--bg-color); color: var(--text-main); height: 100vh; display: flex; overflow: hidden; }
+body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-color); color: var(--text-main); height: 100vh; display: flex; overflow: hidden; }
 
+/* Giriş Ekranı */
 #login-screen {
   background-color: var(--panel-color); padding: 2.5rem; border-radius: var(--border-radius);
   text-align: center; box-shadow: 0 8px 24px rgba(0,0,0,0.5); width: 350px;
-  position: absolute; top:50%; left:50%; transform:translate(-50%, -50%);
+  position: absolute; top:50%; left:50%; transform:translate(-50%, -50%); z-index: 100;
 }
 #login-screen h2 { margin-bottom: 2rem; color: #fff; }
 #login-screen input { padding: 1rem; border-radius: 4px; border: 1px solid #202225; background-color: var(--input-bg); color: var(--text-main); outline: none; width: 100%; margin-bottom: 1.5rem; }
@@ -27,58 +28,79 @@ body { font-family: 'Segoe UI', sans-serif; background-color: var(--bg-color); c
 
 #app-container { display: flex; width: 100%; height: 100%; }
 
+/* Sol Sidebar ve Kanallar */
 .sidebar { width: 250px; background-color: var(--sidebar-color); display: flex; flex-direction: column; }
-.sidebar-scrollable { flex-grow: 1; overflow-y: auto; padding: 1rem; }
-.channel-section h3 { margin-bottom: 0.8rem; font-size: 0.8rem; color: var(--text-muted); }
+.sidebar-scrollable { flex-grow: 1; overflow-y: auto; padding: 0.8rem; }
+.channel-section h3 { margin-bottom: 0.5rem; margin-top: 1rem; font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: bold; padding-left: 0.2rem;}
 #text-channels-list, #voice-channels-list { list-style: none; }
-.channel { border-radius: 4px; cursor: pointer; color: var(--text-muted); font-weight: 600; margin-bottom: 0.3rem;}
-.text-channel { padding: 0.6rem; transition: 0.2s; }
-.text-channel:hover { background: rgba(255,255,255,0.03); color: #fff; }
-.text-channel.active { background: rgba(255,255,255,0.08); color: #fff; }
+.channel { border-radius: 4px; cursor: pointer; color: #8e9297; font-weight: 500; margin-bottom: 2px;}
 
-.voice-channel { display: flex; flex-direction: column; background: transparent; padding: 0;}
-.voice-channel-header { padding: 0.6rem; border-radius: 4px; transition: 0.2s; }
-.voice-channel-header:hover { background: rgba(255,255,255,0.03); color: #fff; }
-.voice-channel.active .voice-channel-header { color: var(--success-color); }
-.voice-users { list-style: none; padding-left: 1.2rem; width: 100%; }
-.voice-user-info { display: flex; align-items: center; font-size: 0.9rem; color: #b9bbbe; padding: 0.3rem; border-radius: 4px; cursor:pointer;}
+/* Text Kanalları Özel (SVG+Yazı) */
+.text-channel { display: flex; align-items: center; padding: 0.4rem 0.5rem; transition: 0.1s ease;}
+.text-channel:hover { background: rgba(255,255,255,0.03); color: #dcddde; }
+.text-channel.active { background: rgba(255,255,255,0.1); color: #fff; }
+
+/* Ses Kanalları Özel (Header + Liste) */
+.voice-channel { background: transparent; padding: 0; }
+.voice-channel-header {
+  display: flex; align-items: center; padding: 0.4rem 0.5rem; border-radius: 4px; 
+  transition: 0.1s ease;
+}
+.voice-channel-header:hover { background: rgba(255,255,255,0.03); color: #dcddde; }
+.voice-channel.active .voice-channel-header { background: rgba(255,255,255,0.1); color: #fff; }
+
+.voice-users { list-style: none; width: 100%; padding-left: 1.5rem; margin-top: 2px; }
+.voice-user-info { display: flex; align-items: center; font-size: 0.95rem; color: #b9bbbe; padding: 0.3rem 0.5rem; border-radius: 4px; cursor:pointer;}
 .voice-user-info:hover { background: rgba(255,255,255,0.05); }
 
-/* VAD AVATAR */
-.avatar-circle {
-  width: 22px; height: 22px; border-radius: 50%;
-  background-color: var(--highlight-color); border: 2px solid transparent; 
-  color: white; display: flex; justify-content: center; align-items: center;
-  font-size: 0.75rem; font-weight: bold; margin-right: 8px; flex-shrink: 0;
+/* VAD : SES KANALI KOYU AVATAR (Black circle, Green shine, human base SVG) */
+.voice-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background-color: #202225;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23dcddde"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>');
+  background-size: 16px;
+  background-position: center bottom;
+  background-repeat: no-repeat;
+  border: 2px solid transparent; 
+  margin-right: 8px;
+  flex-shrink: 0;
   transition: all 0.1s ease;
 }
-.avatar-circle.speaking { border-color: #43b581; box-shadow: 0 0 8px rgba(67, 181, 129, 0.9); }
-.voice-volume-control { padding: 0.5rem 0 0.5rem 2.2rem; animation: fadein 0.2s; }
+.voice-avatar.speaking {
+  border-color: #43b581; 
+  box-shadow: 0 0 6px rgba(67, 181, 129, 0.4);
+}
+
+.voice-volume-control { padding: 0.5rem 0 0.5rem 2.8rem; animation: fadein 0.2s; }
 .voice-volume-control input[type=range] { width: 90%; accent-color: var(--highlight-color); }
 
-/* ALT PANEL - DISCORD BİREBİR AYNISI */
+/* ALT KANAL PANELİ (Voice Connected ve Kontroller) */
 .user-bottom-panel { background-color: #292b2f; flex-shrink: 0; width: 100%; }
-#voice-connection-info { display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
-.voice-text { display: flex; flex-direction: column; }
-.status-title { color: #43b581; font-size: 0.75rem; font-weight: bold; }
-.status-room { color: #b9bbbe; font-size: 0.7rem; }
 
-.user-controls-bar { display: flex; align-items: center; justify-content: space-between; padding: 0.5rem; transition: background 0.2s; }
+#voice-connection-info { display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.8rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.connection-left { display: flex; align-items: center; }
+.signal-icon { margin-right: 8px; flex-shrink: 0; }
+.voice-text { display: flex; flex-direction: column; }
+.status-title { color: #43b581; font-size: 0.75rem; font-weight: 700; margin-bottom:2px;}
+.status-room { color: #b9bbbe; font-size: 0.75rem; }
+
+.user-controls-bar { display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.8rem;}
 .current-user-info { display: flex; align-items: center; cursor: pointer; padding: 4px; border-radius: 4px; overflow: hidden; }
 .current-user-info:hover { background-color: #36393f; }
-.user-name-tag { display: flex; flex-direction: column; justify-content: center; width: 70px; }
-#display-my-username { color: #fff; font-size: 0.85rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
+.user-name-tag { display: flex; flex-direction: column; justify-content: center; max-width: 80px; }
+#display-my-username { color: #fff; font-size: 0.85rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.1; margin-bottom: 2px;}
 .user-tag { color: #b9bbbe; font-size: 0.7rem; line-height: 1.1; }
 
 .control-icons { display: flex; gap: 2px; }
 .icon-btn {
   background: transparent; border: none; color: #b9bbbe; width: 32px; height: 32px;
-  cursor: pointer; border-radius: 4px; transition: 0.2s; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; border-radius: 4px; transition: 0.1s ease; display: flex; align-items: center; justify-content: center;
 }
 .icon-btn:hover { background: #36393f; color: #dcddde; }
-.hover-danger:hover { color: var(--danger-color) !important; font-weight: bold; }
+.hover-danger:hover { color: var(--danger-color) !important; }
 
-/* SVG ve Çizgi (Mute/Deafen) */
 .strikethrough-icon { color: #ed4245 !important; position: relative; }
 .strikethrough-icon::after {
   content: ""; position: absolute; top: 50%; left: 50%;
@@ -89,20 +111,30 @@ body { font-family: 'Segoe UI', sans-serif; background-color: var(--bg-color); c
 .voice-user-states { display: flex; gap: 2px; margin-left: auto; }
 .state-icon { display:flex; align-items:center; justify-content:center; color: #ed4245; position: relative; width: 22px; height: 22px; }
 
-/* SAĞ TARAF */
-.right-sidebar { width: 250px; background-color: var(--sidebar-color); padding: 1rem; display: flex; flex-direction: column; }
+/* SAĞ TARAF : KULLANICILAR */
+.right-sidebar { width: 250px; background-color: var(--sidebar-color); padding: 1rem 0; display: flex; flex-direction: column; }
 .users-section { display: flex; flex-direction: column; flex-grow: 1; overflow: hidden; }
-.users-section h3 { margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; color: var(--text-muted); padding: 0 0.5rem;}
-#users-list { list-style: none; flex-grow: 1; overflow-y: auto; }
+.users-section h3 { margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: var(--text-muted); padding: 0 1rem;}
+
+#users-list { list-style: none; flex-grow: 1; overflow-y: auto; padding: 0 0.5rem;}
 #users-list li {
-  padding: 0.5rem; margin-bottom: 2px; display: flex; justify-content: space-between;
+  padding: 0.4rem 0.5rem; margin-bottom: 2px; display: flex; justify-content: space-between;
   align-items: center; border-radius:4px; font-size: 0.95rem; cursor: pointer; transition: background 0.1s;
 }
 #users-list li:hover { background-color: rgba(255,255,255,0.05); }
-.right-user-info { display: flex; align-items: center; color: #8e9297; font-weight: 500; }
+
+/* Sağ Paneldeki Özel Renkli Avatarlar */
+.right-panel-avatar {
+  width: 32px; height: 32px; border-radius: 50%;
+  background-color: var(--highlight-color); 
+  color: white; display: flex; justify-content: center; align-items: center;
+  font-size: 1rem; font-weight: bold; margin-right: 12px; flex-shrink: 0;
+}
+.right-user-info { display: flex; align-items: center; color: #8e9297; font-weight: 500; flex-grow: 1; }
 .right-user-info.online { color: #fff; }
+
 #users-list button { background-color: var(--success-color); color: #fff; padding: 0.3rem 0.5rem; border:none; border-radius: 3px; cursor: pointer; font-size: 0.7rem; font-weight: bold; display:none; }
-#users-list li:hover button { display: block; } /* Sadece hoverda ara butonu çıksın, temiz dursun */
+#users-list li:hover button { display: block; } 
 
 /* ORTA BÖLÜM */
 .main-content { flex-grow: 1; display: flex; flex-direction: column; background-color: var(--chat-bg); }
@@ -120,6 +152,7 @@ body { font-family: 'Segoe UI', sans-serif; background-color: var(--bg-color); c
 .danger-btn { background: var(--danger-color); color: white; border: none; padding: 0.8rem; border-radius: 4px; cursor: pointer; font-weight: bold; }
 @keyframes fadein { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
 
+/* VİDEO MODALI */
 #video-modal { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.85); display: flex; justify-content: center; align-items: center; z-index: 1000; }
 .video-modal-content { background: var(--panel-color); padding: 1.5rem; border-radius: 8px; width: 90%; max-width: 1000px; display: flex; flex-direction: column; gap: 1.5rem; box-shadow: 0 10px 40px rgba(0,0,0,0.9); }
 #video-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }

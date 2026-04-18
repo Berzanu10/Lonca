@@ -35,18 +35,16 @@ const toggleDeafBtn = document.getElementById('toggle-deaf-btn');
 const bottomLeaveVoiceBtn = document.getElementById('bottom-leave-voice');
 const voiceConnectionInfo = document.getElementById('voice-connection-info');
 const activeVoiceRoomName = document.getElementById('active-voice-room-name');
-const myAvatar = document.getElementById('my-avatar');
 const displayMyUsername = document.getElementById('display-my-username');
 
-const micSVG = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>`;
-const headSVG = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c-4.97 0-9 4.03-9 9v7c0 1.1.9 2 2 2h4v-8H5v-1c0-3.87 3.13-7 7-7s7 3.13 7 7v1h-4v8h4c1.1 0 2-.9 2-2v-7c0-4.97-4.03-9-9-9z"/></svg>`;
+const micSVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>`;
+const headSVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c-4.97 0-9 4.03-9 9v7c0 1.1.9 2 2 2h4v-8H5v-1c0-3.87 3.13-7 7-7s7 3.13 7 7v1h-4v8h4c1.1 0 2-.9 2-2v-7c0-4.97-4.03-9-9-9z"/></svg>`;
 
 joinBtn.addEventListener('click', () => {
     const name = usernameInput.value.trim();
     if (name) {
         myUsername = name;
         displayMyUsername.textContent = myUsername;
-        myAvatar.textContent = myUsername.charAt(0).toUpperCase();
 
         loginScreen.style.display = 'none';
         appContainer.style.display = 'flex';
@@ -136,7 +134,7 @@ function applyHardwareStates() {
 }
 
 // -----------------------------------------
-// Global Liste (SAĞ PANEL)
+// Global Sağ Liste - KULLANICILAR
 // -----------------------------------------
 socket.on('global-users', (usersObj) => {
     allUsersList = usersObj;
@@ -151,13 +149,14 @@ socket.on('global-users', (usersObj) => {
         if (u.peerId === myPeerId) continue; 
         
         const li = document.createElement('li');
-        li.style.opacity = u.isOnline ? '1' : '0.5';
+        li.style.opacity = u.isOnline ? '1' : '0.4';
         
         const infoDiv = document.createElement('div');
         infoDiv.className = u.isOnline ? 'right-user-info online' : 'right-user-info';
         
+        // Mavi Harfli Sağ Taraf Özel Avatar
         const avatar = document.createElement('div');
-        avatar.className = 'avatar-circle';
+        avatar.className = 'right-panel-avatar';
         avatar.textContent = u.username.charAt(0).toUpperCase();
         infoDiv.appendChild(avatar);
         
@@ -170,7 +169,7 @@ socket.on('global-users', (usersObj) => {
              callBtn.innerHTML = "Ara";
              callBtn.onclick = () => initiatePrivateCall(u.peerId, u.username);
         } else {
-             callBtn.style.display = 'none'; // Çevrimdışıysa kalabalık yapmasın
+             callBtn.style.display = 'none'; 
         }
         
         li.appendChild(infoDiv); 
@@ -197,7 +196,6 @@ textChannels.forEach(channel => {
 function joinTextRoom(room) {
     if(!myPeerId) return;
     messages.innerHTML = '';
-    // Sistem mesajı KESİLDİ
     socket.emit('join-text-room', room);
 }
 socket.on('create-message', (message, senderName) => appendMessage(senderName, message));
@@ -240,7 +238,7 @@ async function connectVoiceRoom(room) {
     document.querySelector(`.voice-channel[data-room="${room}"]`).classList.add('active');
     
     voiceConnectionInfo.style.display = 'flex';
-    activeVoiceRoomName.textContent = "🔊 " + room;
+    activeVoiceRoomName.textContent = `"${room}" / Lonca Sunucusu`;
     socket.emit('join-voice-room', room);
 }
 
@@ -273,15 +271,14 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
                  mainDiv.className = 'voice-user-info';
                  
                  const circle = document.createElement('div');
-                 circle.className = 'avatar-circle';
+                 circle.className = 'voice-avatar';
                  circle.id = 'voice-user-avatar-' + id;
-                 circle.textContent = userDataObj.username.charAt(0).toUpperCase();
                  
                  const nameSpan = document.createElement('span');
                  nameSpan.textContent = userDataObj.username;
                  nameSpan.style.flexGrow = '1';
-                 
-                 if(id === myPeerId) { nameSpan.style.color = '#fff'; nameSpan.style.fontWeight = 'bold'; }
+                 nameSpan.style.fontWeight = '500';
+                 if(id === myPeerId) nameSpan.style.color = '#fff';
                  
                  const statesContainer = document.createElement('div');
                  statesContainer.className = 'voice-user-states';
@@ -365,7 +362,7 @@ function removeRemoteAudio(peerId) {
 }
 
 // -----------------------------------------
-// VAD
+// VAD (Voice Activity Detection)
 // -----------------------------------------
 function initAudioContext() {
     if(!audioContext) {
@@ -401,9 +398,11 @@ function checkSpeechLooped() {
         if(id === myPeerId && isMicMuted) average = 0;
 
         const circle = document.getElementById('voice-user-avatar-' + id);
-        if(id === myPeerId) {
-            if(average > 10) myAvatar.classList.add('speaking');
-            else myAvatar.classList.remove('speaking');
+        const myAv = document.getElementById('my-avatar');
+        
+        if(id === myPeerId && myAv) {
+            if(average > 10) myAv.classList.add('speaking');
+            else myAv.classList.remove('speaking');
         }
 
         if(circle) {
