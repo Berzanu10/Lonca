@@ -153,7 +153,6 @@ socket.on('global-users', (usersObj) => {
         const infoDiv = document.createElement('div');
         infoDiv.className = u.isOnline ? 'right-user-info online' : 'right-user-info';
         
-        // Mavi Harfli Sağ Taraf Özel Avatar
         const avatar = document.createElement('div');
         avatar.className = 'right-panel-avatar';
         avatar.textContent = u.username.charAt(0).toUpperCase();
@@ -162,7 +161,6 @@ socket.on('global-users', (usersObj) => {
         const nameSpan = document.createElement('span');
         nameSpan.textContent = u.username;
         
-        // KENDİ İSMİNİ PARLAT!
         if (u.peerId === myPeerId) {
              nameSpan.textContent += " (Sen)";
              nameSpan.style.color = "#43b581"; 
@@ -247,6 +245,11 @@ async function connectVoiceRoom(room) {
     voiceConnectionInfo.style.display = 'flex';
     activeVoiceRoomName.textContent = `"${room}" / Lonca Sunucusu`;
     socket.emit('join-voice-room', room);
+    
+    // Sunucuya state durumlarımızı hızla güncelletelim ki eksik kalmasın (Undefined Name & Missing State Çözümü)
+    setTimeout(() => {
+        socket.emit('voice-state-update', { mic: !isMicMuted, deaf: !isDeafened });
+    }, 200);
 }
 
 socket.on('voice-join-success', (usersInRoom) => {
@@ -282,7 +285,8 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
                  circle.id = 'voice-user-avatar-' + id;
                  
                  const nameSpan = document.createElement('span');
-                 nameSpan.textContent = userDataObj.username;
+                 // İsim hatası için garantili MyUsername ataması (undefined sorununu çözer)
+                 nameSpan.textContent = userDataObj.username || (id === myPeerId ? myUsername : "Kullanıcı");
                  nameSpan.style.flexGrow = '1';
                  nameSpan.style.fontWeight = '500';
                  if(id === myPeerId) nameSpan.style.color = '#fff';
@@ -290,18 +294,16 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
                  const statesContainer = document.createElement('div');
                  statesContainer.className = 'voice-user-states';
                  
-                 if (!userDataObj.mic) {
-                     const mIcon = document.createElement('div');
-                     mIcon.className = 'state-icon strikethrough-icon';
-                     mIcon.innerHTML = micSVG;
-                     statesContainer.appendChild(mIcon);
-                 }
-                 if (!userDataObj.deaf) {
-                     const dIcon = document.createElement('div');
-                     dIcon.className = 'state-icon strikethrough-icon';
-                     dIcon.innerHTML = headSVG;
-                     statesContainer.appendChild(dIcon);
-                 }
+                 // İkonlar her zaman ekranda DURMALI. Sadece kapandığında ".strikethrough-icon" klasını alıp efsanevi çizgi ve kırmızı rengi kendine çeker!
+                 const mIcon = document.createElement('div');
+                 mIcon.className = (userDataObj.mic === false) ? 'state-icon strikethrough-icon' : 'state-icon';
+                 mIcon.innerHTML = micSVG;
+                 statesContainer.appendChild(mIcon);
+                 
+                 const dIcon = document.createElement('div');
+                 dIcon.className = (userDataObj.deaf === false) ? 'state-icon strikethrough-icon' : 'state-icon';
+                 dIcon.innerHTML = headSVG;
+                 statesContainer.appendChild(dIcon);
                  
                  mainDiv.appendChild(circle); mainDiv.appendChild(nameSpan); mainDiv.appendChild(statesContainer);
                  li.appendChild(mainDiv);

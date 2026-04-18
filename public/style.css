@@ -53,7 +53,7 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
 .voice-user-info { display: flex; align-items: center; font-size: 0.95rem; color: #b9bbbe; padding: 0.3rem 0.5rem; border-radius: 4px; cursor:pointer;}
 .voice-user-info:hover { background: rgba(255,255,255,0.05); }
 
-/* VAD : SES KANALI KOYU AVATAR */
+/* VAD : SES KANALI KOYU AVATAR (Black circle, Green shine, human base SVG) */
 .voice-avatar {
   width: 24px;
   height: 24px;
@@ -76,7 +76,7 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
 .voice-volume-control { padding: 0.5rem 0 0.5rem 2.8rem; animation: fadein 0.2s; }
 .voice-volume-control input[type=range] { width: 90%; accent-color: var(--highlight-color); }
 
-/* ALT KANAL PANELİ */
+/* ALT KANAL PANELİ (Voice Connected ve Kontroller) */
 .user-bottom-panel { background-color: #292b2f; flex-shrink: 0; width: 100%; }
 
 #voice-connection-info { display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.8rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
@@ -101,15 +101,22 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
 .icon-btn:hover { background: #36393f; color: #dcddde; }
 .hover-danger:hover { color: var(--danger-color) !important; }
 
+/* Strikethrough Çizgileri - ÇÖZÜLDÜ (Daha zarif, SVGlere sığacak incelikte ve arkaplansız) */
 .strikethrough-icon { color: #ed4245 !important; position: relative; }
 .strikethrough-icon::after {
   content: ""; position: absolute; top: 50%; left: 50%;
-  width: 26px; height: 3px; background-color: #ed4245; border: 2px solid #292b2f;
+  width: 24px; height: 3px; background-color: #ed4245; border: 2px solid transparent; 
   transform: translate(-50%, -50%) rotate(45deg); border-radius: 2px; z-index: 2;
 }
 
 .voice-user-states { display: flex; gap: 2px; margin-left: auto; }
-.state-icon { display:flex; align-items:center; justify-content:center; color: #ed4245; position: relative; width: 22px; height: 22px; }
+/* state-icon sınıfı NORMAL gri olacak, Mute yiyince kırmızı+çizgili olacak */
+.state-icon { display:flex; align-items:center; justify-content:center; color: #b9bbbe; position: relative; width: 22px; height: 22px; margin-left: 2px; }
+.state-icon.strikethrough-icon { color: #ed4245; }
+.state-icon.strikethrough-icon::after {
+  width: 18px; height: 2px; 
+}
+
 
 /* SAĞ TARAF : KULLANICILAR */
 .right-sidebar { width: 250px; background-color: var(--sidebar-color); padding: 1rem 0; display: flex; flex-direction: column; }
