@@ -4,18 +4,18 @@ let peer, myPeerId, myUsername;
 let currentTextRoom = 'genel';
 let currentVoiceRoom = null;
 
-let localAudioStream = null; 
-let localVideoStream = null; 
+let localAudioStream = null;
+let localVideoStream = null;
 let privateCall = null;
-let voiceCalls = {}; 
-let allUsersList = {}; 
+let voiceCalls = {};
+let allUsersList = {};
 
 let audioContext = null;
-const analysers = {}; 
+const analysers = {};
 
 let isMicMuted = false;
 let isDeafened = false;
-let prevMicMuted = false; 
+let prevMicMuted = false;
 
 const loginScreen = document.getElementById('login-screen');
 const appContainer = document.getElementById('app-container');
@@ -62,35 +62,36 @@ function initializePeer() {
     });
 
     peer.on('call', async call => {
-        if(call.metadata && call.metadata.type === 'voice-room') {
-             if(!localAudioStream) {
-                 try {
-                     localAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-                     monitorSpeech(localAudioStream, myPeerId); 
-                     applyHardwareStates(); 
-                 } catch(err) { }
-             }
-             call.answer(localAudioStream);
-             voiceCalls[call.peer] = call;
-             
-             call.on('stream', remoteAudio => {
-                 playRemoteAudio(remoteAudio, call.peer);
-                 monitorSpeech(remoteAudio, call.peer); 
-             });
-             call.on('close', () => {
-                 removeRemoteAudio(call.peer);
-                 stopMonitor(call.peer);
-             });
-             return;
+        if (call.metadata && call.metadata.type === 'voice-room') {
+            if (!localAudioStream) {
+                try {
+                    localAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                    monitorSpeech(localAudioStream, myPeerId);
+                    applyHardwareStates();
+                } catch (err) { }
+            }
+            call.answer(localAudioStream);
+            voiceCalls[call.peer] = call;
+
+
+            call.on('stream', remoteAudio => {
+                playRemoteAudio(remoteAudio, call.peer);
+                monitorSpeech(remoteAudio, call.peer);
+            });
+            call.on('close', () => {
+                removeRemoteAudio(call.peer);
+                stopMonitor(call.peer);
+            });
+            return;
         }
 
         let callerName = "Biri";
-        for(let ip in allUsersList) if(allUsersList[ip].peerId === call.peer) callerName = allUsersList[ip].username;
-        
+        for (let ip in allUsersList) if (allUsersList[ip].peerId === call.peer) callerName = allUsersList[ip].username;
+
         if (window.confirm(`${callerName} sizi ÖZEL görüntülü arıyor! Kabul ediyor musunuz?`)) {
             try {
                 if (!localVideoStream) localVideoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                call.answer(localVideoStream); 
+                call.answer(localVideoStream);
                 privateCall = call;
                 openVideoModal(); addVideoStream(localVideoStream, 'local', 'Sen');
                 call.on('stream', userStream => addVideoStream(userStream, call.peer, callerName));
@@ -102,7 +103,7 @@ function initializePeer() {
 
 toggleDeafBtn.addEventListener('click', () => {
     isDeafened = !isDeafened;
-    if(isDeafened) {
+    if (isDeafened) {
         prevMicMuted = isMicMuted;
         isMicMuted = true;
     } else {
@@ -111,8 +112,9 @@ toggleDeafBtn.addEventListener('click', () => {
     applyHardwareStates();
 });
 
+
 toggleMicBtn.addEventListener('click', () => {
-    if(isDeafened) return; 
+    if (isDeafened) return;
     isMicMuted = !isMicMuted;
     applyHardwareStates();
 });
@@ -120,16 +122,16 @@ toggleMicBtn.addEventListener('click', () => {
 function applyHardwareStates() {
     toggleMicBtn.classList.toggle('strikethrough-icon', isMicMuted);
     toggleDeafBtn.classList.toggle('strikethrough-icon', isDeafened);
-    
+
     if (localAudioStream) {
         localAudioStream.getAudioTracks().forEach(track => { track.enabled = !isMicMuted; });
     }
-    
-    for(let id in voiceCalls) {
+
+    for (let id in voiceCalls) {
         const aud = document.getElementById('audio-' + id);
-        if(aud) aud.muted = isDeafened; 
+        if (aud) aud.muted = isDeafened;
     }
-    
+
     socket.emit('voice-state-update', { mic: !isMicMuted, deaf: !isDeafened });
 }
 
@@ -139,46 +141,46 @@ function applyHardwareStates() {
 socket.on('global-users', (usersObj) => {
     allUsersList = usersObj;
     usersList.innerHTML = '';
-    const ips = Object.keys(allUsersList).sort((a,b) => {
-       if(allUsersList[a].isOnline && !allUsersList[b].isOnline) return -1;
-       if(!allUsersList[a].isOnline && allUsersList[b].isOnline) return 1;
-       return 0;
+    const ips = Object.keys(allUsersList).sort((a, b) => {
+        if (allUsersList[a].isOnline && !allUsersList[b].isOnline) return -1;
+        if (!allUsersList[a].isOnline && allUsersList[b].isOnline) return 1;
+        return 0;
     });
     for (let ip of ips) {
         const u = allUsersList[ip];
-        
+
         const li = document.createElement('li');
         li.style.opacity = u.isOnline ? '1' : '0.4';
-        
+
         const infoDiv = document.createElement('div');
         infoDiv.className = u.isOnline ? 'right-user-info online' : 'right-user-info';
-        
+
         const avatar = document.createElement('div');
         avatar.className = 'right-panel-avatar';
         avatar.textContent = u.username.charAt(0).toUpperCase();
         infoDiv.appendChild(avatar);
-        
+
         const nameSpan = document.createElement('span');
         nameSpan.textContent = u.username;
-        
+
         if (u.peerId === myPeerId) {
-             nameSpan.textContent += " (Sen)";
-             nameSpan.style.color = "#43b581"; 
-             nameSpan.style.fontWeight = "bold";
+            nameSpan.textContent += " (Sen)";
+            nameSpan.style.color = "#43b581";
+            nameSpan.style.fontWeight = "bold";
         }
-        
+
         infoDiv.appendChild(nameSpan);
-        
+
         const callBtn = document.createElement('button');
-        if(u.isOnline && u.peerId !== myPeerId) {
-             callBtn.innerHTML = "Ara";
-             callBtn.onclick = () => initiatePrivateCall(u.peerId, u.username);
+        if (u.isOnline && u.peerId !== myPeerId) {
+            callBtn.innerHTML = "Ara";
+            callBtn.onclick = () => initiatePrivateCall(u.peerId, u.username);
         } else {
-             callBtn.style.display = 'none'; 
+            callBtn.style.display = 'none';
         }
-        
-        li.appendChild(infoDiv); 
-        if(u.isOnline && u.peerId !== myPeerId) li.appendChild(callBtn); 
+
+        li.appendChild(infoDiv);
+        if (u.isOnline && u.peerId !== myPeerId) li.appendChild(callBtn);
         usersList.appendChild(li);
     }
 });
@@ -189,7 +191,7 @@ socket.on('global-users', (usersObj) => {
 textChannels.forEach(channel => {
     channel.addEventListener('click', () => {
         const newRoom = channel.getAttribute('data-room');
-        if(newRoom !== currentTextRoom) {
+        if (newRoom !== currentTextRoom) {
             textChannels.forEach(c => c.classList.remove('active'));
             channel.classList.add('active');
             currentTextRoom = newRoom;
@@ -199,7 +201,7 @@ textChannels.forEach(channel => {
     });
 });
 function joinTextRoom(room) {
-    if(!myPeerId) return;
+    if (!myPeerId) return;
     messages.innerHTML = '';
     socket.emit('join-text-room', room);
 }
@@ -212,7 +214,7 @@ chatForm.addEventListener('submit', (e) => {
 function appendMessage(sender, msg) {
     const div = document.createElement('div');
     div.classList.add('message');
-    if(sender === myUsername) div.classList.add('mine');
+    if (sender === myUsername) div.classList.add('mine');
     div.innerHTML = `<strong>${sender}:</strong> <span>${msg}</span>`;
     messages.appendChild(div); messages.scrollTop = messages.scrollHeight;
 }
@@ -224,28 +226,28 @@ voiceChannels.forEach(channel => {
     const header = channel.querySelector('.voice-channel-header');
     header.addEventListener('click', () => {
         const newRoom = channel.getAttribute('data-room');
-        if(newRoom !== currentVoiceRoom) connectVoiceRoom(newRoom);
+        if (newRoom !== currentVoiceRoom) connectVoiceRoom(newRoom);
     });
 });
 
-async function connectVoiceRoom(room) {    
+async function connectVoiceRoom(room) {
     try {
         localAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-        monitorSpeech(localAudioStream, myPeerId); 
-        applyHardwareStates(); 
-    } catch(e) {
+        monitorSpeech(localAudioStream, myPeerId);
+        applyHardwareStates();
+    } catch (e) {
         alert("Mikrofon izni olmadan sesli kanalla bağlantı kurulamaz."); return;
     }
-    
+
     disconnectVoiceRoom();
     currentVoiceRoom = room;
     voiceChannels.forEach(c => c.classList.remove('active'));
     document.querySelector(`.voice-channel[data-room="${room}"]`).classList.add('active');
-    
+
     voiceConnectionInfo.style.display = 'flex';
     activeVoiceRoomName.textContent = `"${room}" / Lonca Sunucusu`;
     socket.emit('join-voice-room', room);
-    
+
     // Sunucuya state durumlarımızı hızla güncelletelim ki eksik kalmasın (Undefined Name & Missing State Çözümü)
     setTimeout(() => {
         socket.emit('voice-state-update', { mic: !isMicMuted, deaf: !isDeafened });
@@ -254,11 +256,11 @@ async function connectVoiceRoom(room) {
 
 socket.on('voice-join-success', (usersInRoom) => {
     for (let pId in usersInRoom) {
-        if(pId !== myPeerId) {
+        if (pId !== myPeerId) {
             const call = peer.call(pId, localAudioStream, { metadata: { type: 'voice-room' } });
             voiceCalls[pId] = call;
             call.on('stream', remoteAudio => {
-                 playRemoteAudio(remoteAudio, pId); monitorSpeech(remoteAudio, pId); 
+                playRemoteAudio(remoteAudio, pId); monitorSpeech(remoteAudio, pId);
             });
             call.on('close', () => { removeRemoteAudio(pId); stopMonitor(pId); });
         }
@@ -267,70 +269,70 @@ socket.on('voice-join-success', (usersInRoom) => {
 
 socket.on('voice-rooms-state', (voiceRoomsData) => {
     document.querySelectorAll('.voice-users').forEach(ul => ul.innerHTML = '');
-    
+
     for (let r in voiceRoomsData) {
         const ul = document.getElementById('voice-users-' + r);
-        if(ul) {
+        if (ul) {
             for (let id in voiceRoomsData[r]) {
-                 const userDataObj = voiceRoomsData[r][id];
-                 
-                 const li = document.createElement('li');
-                 li.className = 'voice-user';
-                 
-                 const mainDiv = document.createElement('div');
-                 mainDiv.className = 'voice-user-info';
-                 
-                 const circle = document.createElement('div');
-                 circle.className = 'voice-avatar';
-                 circle.id = 'voice-user-avatar-' + id;
-                 
-                 const nameSpan = document.createElement('span');
-                 // İsim hatası için garantili MyUsername ataması (undefined sorununu çözer)
-                 nameSpan.textContent = userDataObj.username || (id === myPeerId ? myUsername : "Kullanıcı");
-                 nameSpan.style.flexGrow = '1';
-                 nameSpan.style.fontWeight = '500';
-                 if(id === myPeerId) nameSpan.style.color = '#fff';
-                 
-                 const statesContainer = document.createElement('div');
-                 statesContainer.className = 'voice-user-states';
-                 
-                 // İkonlar her zaman ekranda DURMALI. Sadece kapandığında ".strikethrough-icon" klasını alıp efsanevi çizgi ve kırmızı rengi kendine çeker!
-                 const mIcon = document.createElement('div');
-                 mIcon.className = (userDataObj.mic === false) ? 'state-icon strikethrough-icon' : 'state-icon';
-                 mIcon.innerHTML = micSVG;
-                 statesContainer.appendChild(mIcon);
-                 
-                 const dIcon = document.createElement('div');
-                 dIcon.className = (userDataObj.deaf === false) ? 'state-icon strikethrough-icon' : 'state-icon';
-                 dIcon.innerHTML = headSVG;
-                 statesContainer.appendChild(dIcon);
-                 
-                 mainDiv.appendChild(circle); mainDiv.appendChild(nameSpan); mainDiv.appendChild(statesContainer);
-                 li.appendChild(mainDiv);
+                const userDataObj = voiceRoomsData[r][id];
 
-                 if(id !== myPeerId && currentVoiceRoom === r) {
-                      const volDiv = document.createElement('div');
-                      volDiv.className = 'voice-volume-control';
-                      volDiv.style.display = 'none'; 
-                      
-                      const lbl = document.createElement('div');
-                      lbl.textContent = '🔉 Kullanıcı Sesi';
-                      lbl.style.fontSize = '0.7rem'; lbl.style.color = '#b9bbbe'; lbl.style.marginBottom = '4px';
-                      
-                      const range = document.createElement('input');
-                      range.type = 'range'; range.min = 0; range.max = 1; range.step = 0.05;
-                      const existingAudio = document.getElementById('audio-' + id);
-                      range.value = existingAudio ? existingAudio.volume : 1;
-                      
-                      range.oninput = (e) => {
-                          const au = document.getElementById('audio-' + id);
-                          if(au) au.volume = e.target.value;
-                      };
-                      volDiv.appendChild(lbl); volDiv.appendChild(range); li.appendChild(volDiv);
-                      
-                      mainDiv.onclick = () => { volDiv.style.display = (volDiv.style.display === 'none') ? 'block' : 'none'; };
-                 }
-                 ul.appendChild(li);
+                const li = document.createElement('li');
+                li.className = 'voice-user';
+
+                const mainDiv = document.createElement('div');
+                mainDiv.className = 'voice-user-info';
+
+                const circle = document.createElement('div');
+                circle.className = 'voice-avatar';
+                circle.id = 'voice-user-avatar-' + id;
+
+                const nameSpan = document.createElement('span');
+                // İsim hatası için garantili MyUsername ataması (undefined sorununu çözer)
+                nameSpan.textContent = userDataObj.username || (id === myPeerId ? myUsername : "Kullanıcı");
+                nameSpan.style.flexGrow = '1';
+                nameSpan.style.fontWeight = '500';
+                if (id === myPeerId) nameSpan.style.color = '#fff';
+
+                const statesContainer = document.createElement('div');
+                statesContainer.className = 'voice-user-states';
+
+                // İkonlar her zaman ekranda DURMALI. Sadece kapandığında ".strikethrough-icon" klasını alıp efsanevi çizgi ve kırmızı rengi kendine çeker!
+                const mIcon = document.createElement('div');
+                mIcon.className = (userDataObj.mic === false) ? 'state-icon strikethrough-icon' : 'state-icon';
+                mIcon.innerHTML = micSVG;
+                statesContainer.appendChild(mIcon);
+
+                const dIcon = document.createElement('div');
+                dIcon.className = (userDataObj.deaf === false) ? 'state-icon strikethrough-icon' : 'state-icon';
+                dIcon.innerHTML = headSVG;
+                statesContainer.appendChild(dIcon);
+
+                mainDiv.appendChild(circle); mainDiv.appendChild(nameSpan); mainDiv.appendChild(statesContainer);
+                li.appendChild(mainDiv);
+
+                if (id !== myPeerId && currentVoiceRoom === r) {
+                    const volDiv = document.createElement('div');
+                    volDiv.className = 'voice-volume-control';
+                    volDiv.style.display = 'none';
+
+                    const lbl = document.createElement('div');
+                    lbl.textContent = '🔉 Kullanıcı Sesi';
+                    lbl.style.fontSize = '0.7rem'; lbl.style.color = '#b9bbbe'; lbl.style.marginBottom = '4px';
+
+                    const range = document.createElement('input');
+                    range.type = 'range'; range.min = 0; range.max = 1; range.step = 0.05;
+                    const existingAudio = document.getElementById('audio-' + id);
+                    range.value = existingAudio ? existingAudio.volume : 1;
+
+                    range.oninput = (e) => {
+                        const au = document.getElementById('audio-' + id);
+                        if (au) au.volume = e.target.value;
+                    };
+                    volDiv.appendChild(lbl); volDiv.appendChild(range); li.appendChild(volDiv);
+
+                    mainDiv.onclick = () => { volDiv.style.display = (volDiv.style.display === 'none') ? 'block' : 'none'; };
+                }
+                ul.appendChild(li);
             }
         }
     }
@@ -338,26 +340,26 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
 
 bottomLeaveVoiceBtn.addEventListener('click', disconnectVoiceRoom);
 function disconnectVoiceRoom() {
-    if(!currentVoiceRoom) return;
-    
-    for(let id in voiceCalls) voiceCalls[id].close();
+    if (!currentVoiceRoom) return;
+
+    for (let id in voiceCalls) voiceCalls[id].close();
     voiceCalls = {};
-    if(localAudioStream) {
+    if (localAudioStream) {
         localAudioStream.getTracks().forEach(t => t.stop());
         localAudioStream = null;
         stopMonitor(myPeerId);
     }
-    
-    socket.emit('join-voice-room', null); 
+
+    socket.emit('join-voice-room', null);
     voiceChannels.forEach(c => c.classList.remove('active'));
-    voiceConnectionInfo.style.display = 'none'; 
+    voiceConnectionInfo.style.display = 'none';
     currentVoiceRoom = null;
-    audioContainer.innerHTML = ''; 
+    audioContainer.innerHTML = '';
 }
 
 function playRemoteAudio(stream, peerId) {
     let ad = document.getElementById('audio-' + peerId);
-    if(!ad) {
+    if (!ad) {
         ad = document.createElement('audio');
         ad.id = 'audio-' + peerId; ad.autoplay = true;
         audioContainer.appendChild(ad);
@@ -367,56 +369,56 @@ function playRemoteAudio(stream, peerId) {
 }
 function removeRemoteAudio(peerId) {
     const ad = document.getElementById('audio-' + peerId);
-    if(ad) ad.remove();
+    if (ad) ad.remove();
 }
 
 // -----------------------------------------
 // VAD (Voice Activity Detection)
 // -----------------------------------------
 function initAudioContext() {
-    if(!audioContext) {
+    if (!audioContext) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         checkSpeechLooped();
     }
-    if(audioContext && audioContext.state === 'suspended') audioContext.resume();
+    if (audioContext && audioContext.state === 'suspended') audioContext.resume();
 }
 function monitorSpeech(stream, peerId) {
-    if(!stream) return;
+    if (!stream) return;
     initAudioContext();
     try {
         const source = audioContext.createMediaStreamSource(stream);
         const analyser = audioContext.createAnalyser(); analyser.fftSize = 512;
-        source.connect(analyser); 
+        source.connect(analyser);
         analysers[peerId] = analyser;
-    } catch(e) {}
+    } catch (e) { }
 }
 function stopMonitor(peerId) {
-    if(analysers[peerId]) { analysers[peerId].disconnect?.(); delete analysers[peerId]; }
+    if (analysers[peerId]) { analysers[peerId].disconnect?.(); delete analysers[peerId]; }
 }
 function checkSpeechLooped() {
     requestAnimationFrame(checkSpeechLooped);
-    if(!audioContext) return;
-    for(let id in analysers) {
+    if (!audioContext) return;
+    for (let id in analysers) {
         const analyser = analysers[id];
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
-        analyser.getByteFrequencyData(dataArray); 
+        analyser.getByteFrequencyData(dataArray);
         let sum = 0;
-        for(let i=0; i<dataArray.length; i++) sum += dataArray[i];
+        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
         let average = sum / dataArray.length;
-        
-        if(id === myPeerId && isMicMuted) average = 0;
+
+        if (id === myPeerId && isMicMuted) average = 0;
 
         const circle = document.getElementById('voice-user-avatar-' + id);
         const myAv = document.getElementById('my-avatar');
-        
-        if(id === myPeerId && myAv) {
-            if(average > 10) myAv.classList.add('speaking');
+
+        if (id === myPeerId && myAv) {
+            if (average > 10) myAv.classList.add('speaking');
             else myAv.classList.remove('speaking');
         }
 
-        if(circle) {
-             if(average > 10) circle.classList.add('speaking');
-             else circle.classList.remove('speaking');
+        if (circle) {
+            if (average > 10) circle.classList.add('speaking');
+            else circle.classList.remove('speaking');
         }
     }
 }
@@ -426,16 +428,16 @@ function checkSpeechLooped() {
 // -----------------------------------------
 function openVideoModal() { document.getElementById('video-modal').style.display = 'flex'; }
 function endPrivateCall() {
-    if(privateCall) { privateCall.close(); privateCall = null; }
-    if(localVideoStream) { localVideoStream.getTracks().forEach(t => t.stop()); localVideoStream = null; }
-    document.getElementById('video-grid').innerHTML = ''; document.getElementById('video-modal').style.display = 'none'; 
+    if (privateCall) { privateCall.close(); privateCall = null; }
+    if (localVideoStream) { localVideoStream.getTracks().forEach(t => t.stop()); localVideoStream = null; }
+    document.getElementById('video-grid').innerHTML = ''; document.getElementById('video-modal').style.display = 'none';
 }
 document.getElementById('hangup-btn').addEventListener('click', endPrivateCall);
 function addVideoStream(stream, peerId, username) {
     if (document.getElementById(`wrapper-${peerId}`)) return;
     const cw = document.createElement('div'); cw.id = `wrapper-${peerId}`; cw.className = 'video-wrapper';
     const v = document.createElement('video'); v.srcObject = stream; v.autoplay = true; v.playsInline = true;
-    if(peerId === 'local') { v.muted = true; v.style.transform = 'scaleX(-1)'; }
+    if (peerId === 'local') { v.muted = true; v.style.transform = 'scaleX(-1)'; }
     const l = document.createElement('span'); l.className = 'video-label'; l.textContent = username;
     cw.appendChild(v); cw.appendChild(l); document.getElementById('video-grid').appendChild(cw);
 }
