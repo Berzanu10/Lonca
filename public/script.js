@@ -13,10 +13,9 @@ let allUsersList = {};
 let audioContext = null;
 const analysers = {}; 
 
-// Donanım Durum Değişkenleri
 let isMicMuted = false;
 let isDeafened = false;
-let prevMicMuted = false; // Kulaklık sağırlaştırması bitince mic durumuna geri dönmesi için
+let prevMicMuted = false; 
 
 const loginScreen = document.getElementById('login-screen');
 const appContainer = document.getElementById('app-container');
@@ -31,7 +30,6 @@ const textChannels = document.querySelectorAll('.text-channel');
 const voiceChannels = document.querySelectorAll('.voice-channel');
 const audioContainer = document.getElementById('audio-container');
 
-// Yeni DOM Elementleri (Alt Kontrol Kutusu)
 const toggleMicBtn = document.getElementById('toggle-mic-btn');
 const toggleDeafBtn = document.getElementById('toggle-deaf-btn');
 const bottomLeaveVoiceBtn = document.getElementById('bottom-leave-voice');
@@ -39,6 +37,9 @@ const voiceConnectionInfo = document.getElementById('voice-connection-info');
 const activeVoiceRoomName = document.getElementById('active-voice-room-name');
 const myAvatar = document.getElementById('my-avatar');
 const displayMyUsername = document.getElementById('display-my-username');
+
+const micSVG = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>`;
+const headSVG = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c-4.97 0-9 4.03-9 9v7c0 1.1.9 2 2 2h4v-8H5v-1c0-3.87 3.13-7 7-7s7 3.13 7 7v1h-4v8h4c1.1 0 2-.9 2-2v-7c0-4.97-4.03-9-9-9z"/></svg>`;
 
 joinBtn.addEventListener('click', () => {
     const name = usernameInput.value.trim();
@@ -68,7 +69,7 @@ function initializePeer() {
                  try {
                      localAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
                      monitorSpeech(localAudioStream, myPeerId); 
-                     applyHardwareStates(); // Akış yeni eklenince son donanım seçimini uygula
+                     applyHardwareStates(); 
                  } catch(err) { }
              }
              call.answer(localAudioStream);
@@ -101,50 +102,41 @@ function initializePeer() {
     });
 }
 
-// -----------------------------------------
-// DONANIM KONTROLÜ (MIC VE DEAFEN KESME)
-// -----------------------------------------
 toggleDeafBtn.addEventListener('click', () => {
     isDeafened = !isDeafened;
-    
     if(isDeafened) {
         prevMicMuted = isMicMuted;
-        isMicMuted = true; // Discord kuralı: Sağırlaşınca mic de otomatik kesilir
+        isMicMuted = true;
     } else {
-        isMicMuted = prevMicMuted; // Geri döner
+        isMicMuted = prevMicMuted;
     }
     applyHardwareStates();
 });
 
 toggleMicBtn.addEventListener('click', () => {
-    if(isDeafened) return; // Discord Kuralı: Kulaklık kapalıyken mikrofon açılamaz!
+    if(isDeafened) return; 
     isMicMuted = !isMicMuted;
     applyHardwareStates();
 });
 
 function applyHardwareStates() {
-    // 1. Ekran Çizgileri Toggle
     toggleMicBtn.classList.toggle('strikethrough-icon', isMicMuted);
     toggleDeafBtn.classList.toggle('strikethrough-icon', isDeafened);
     
-    // 2. Local Mikrofon Stream'i Devre Dışı Bırakma (Gerçekten Sesi Keser)
     if (localAudioStream) {
         localAudioStream.getAudioTracks().forEach(track => { track.enabled = !isMicMuted; });
     }
     
-    // 3. Karşıdan Gelenleri Sustur (Headphone Deafen)
     for(let id in voiceCalls) {
         const aud = document.getElementById('audio-' + id);
-        if(aud) aud.muted = isDeafened; // Hoparlörleri kapatır
+        if(aud) aud.muted = isDeafened; 
     }
     
-    // 4. Sunucuyu Haberdar Et! (Ekranda kırmızı logoları çıksın diye)
     socket.emit('voice-state-update', { mic: !isMicMuted, deaf: !isDeafened });
 }
 
-
 // -----------------------------------------
-// Global Liste
+// Global Liste (SAĞ PANEL)
 // -----------------------------------------
 socket.on('global-users', (usersObj) => {
     allUsersList = usersObj;
@@ -161,18 +153,29 @@ socket.on('global-users', (usersObj) => {
         const li = document.createElement('li');
         li.style.opacity = u.isOnline ? '1' : '0.5';
         
-        const span = document.createElement('span');
-        span.innerHTML = `<span style="color: ${u.isOnline ? '#3ba55c' : '#747f8d'}; font-size:1.3em; margin-right:4px;">●</span> ${u.username}`;
+        const infoDiv = document.createElement('div');
+        infoDiv.className = u.isOnline ? 'right-user-info online' : 'right-user-info';
+        
+        const avatar = document.createElement('div');
+        avatar.className = 'avatar-circle';
+        avatar.textContent = u.username.charAt(0).toUpperCase();
+        infoDiv.appendChild(avatar);
+        
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = u.username;
+        infoDiv.appendChild(nameSpan);
         
         const callBtn = document.createElement('button');
         if(u.isOnline) {
-             callBtn.innerHTML = "Özel Ara";
+             callBtn.innerHTML = "Ara";
              callBtn.onclick = () => initiatePrivateCall(u.peerId, u.username);
         } else {
-             callBtn.innerHTML = "Çevrimdışı"; callBtn.disabled = true;
-             callBtn.style.background = '#747f8d'; callBtn.style.cursor = 'not-allowed'; color = '#ccc';
+             callBtn.style.display = 'none'; // Çevrimdışıysa kalabalık yapmasın
         }
-        li.appendChild(span); li.appendChild(callBtn); usersList.appendChild(li);
+        
+        li.appendChild(infoDiv); 
+        if(u.isOnline) li.appendChild(callBtn); 
+        usersList.appendChild(li);
     }
 });
 
@@ -194,6 +197,7 @@ textChannels.forEach(channel => {
 function joinTextRoom(room) {
     if(!myPeerId) return;
     messages.innerHTML = '';
+    // Sistem mesajı KESİLDİ
     socket.emit('join-text-room', room);
 }
 socket.on('create-message', (message, senderName) => appendMessage(senderName, message));
@@ -211,7 +215,7 @@ function appendMessage(sender, msg) {
 }
 
 // -----------------------------------------
-// Ses Odaları & Render & Ses Modları Çizimi
+// Ses Odaları
 // -----------------------------------------
 voiceChannels.forEach(channel => {
     const header = channel.querySelector('.voice-channel-header');
@@ -225,21 +229,18 @@ async function connectVoiceRoom(room) {
     try {
         localAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
         monitorSpeech(localAudioStream, myPeerId); 
-        applyHardwareStates(); // İlk girdiğimizde donanım ayarlarımızı senkronla (belki sessiz girdik)
+        applyHardwareStates(); 
     } catch(e) {
         alert("Mikrofon izni olmadan sesli kanalla bağlantı kurulamaz."); return;
     }
     
-    disconnectVoiceRoom(); // Eski Odadan Çık
-    
+    disconnectVoiceRoom();
     currentVoiceRoom = room;
     voiceChannels.forEach(c => c.classList.remove('active'));
     document.querySelector(`.voice-channel[data-room="${room}"]`).classList.add('active');
     
-    // Sol Altta "Ses Bağlantısı Kuruldu" Ekranını Göster
     voiceConnectionInfo.style.display = 'flex';
     activeVoiceRoomName.textContent = "🔊 " + room;
-    
     socket.emit('join-voice-room', room);
 }
 
@@ -249,8 +250,7 @@ socket.on('voice-join-success', (usersInRoom) => {
             const call = peer.call(pId, localAudioStream, { metadata: { type: 'voice-room' } });
             voiceCalls[pId] = call;
             call.on('stream', remoteAudio => {
-                 playRemoteAudio(remoteAudio, pId);
-                 monitorSpeech(remoteAudio, pId); 
+                 playRemoteAudio(remoteAudio, pId); monitorSpeech(remoteAudio, pId); 
             });
             call.on('close', () => { removeRemoteAudio(pId); stopMonitor(pId); });
         }
@@ -264,7 +264,7 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
         const ul = document.getElementById('voice-users-' + r);
         if(ul) {
             for (let id in voiceRoomsData[r]) {
-                 const userDataObj = voiceRoomsData[r][id]; // {username, mic, deaf}
+                 const userDataObj = voiceRoomsData[r][id];
                  
                  const li = document.createElement('li');
                  li.className = 'voice-user';
@@ -283,27 +283,25 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
                  
                  if(id === myPeerId) { nameSpan.style.color = '#fff'; nameSpan.style.fontWeight = 'bold'; }
                  
-                 // SAĞ TARAFA DONANIM İKONLARI (Mute / Deafen) Ekleme
                  const statesContainer = document.createElement('div');
                  statesContainer.className = 'voice-user-states';
                  
                  if (!userDataObj.mic) {
                      const mIcon = document.createElement('div');
                      mIcon.className = 'state-icon strikethrough-icon';
-                     mIcon.textContent = '🎤';
+                     mIcon.innerHTML = micSVG;
                      statesContainer.appendChild(mIcon);
                  }
                  if (!userDataObj.deaf) {
                      const dIcon = document.createElement('div');
                      dIcon.className = 'state-icon strikethrough-icon';
-                     dIcon.textContent = '🎧';
+                     dIcon.innerHTML = headSVG;
                      statesContainer.appendChild(dIcon);
                  }
                  
                  mainDiv.appendChild(circle); mainDiv.appendChild(nameSpan); mainDiv.appendChild(statesContainer);
                  li.appendChild(mainDiv);
 
-                 // Volume Slider (Başkasının üzerine tıklandığında)
                  if(id !== myPeerId && currentVoiceRoom === r) {
                       const volDiv = document.createElement('div');
                       volDiv.className = 'voice-volume-control';
@@ -326,7 +324,6 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
                       
                       mainDiv.onclick = () => { volDiv.style.display = (volDiv.style.display === 'none') ? 'block' : 'none'; };
                  }
-                 
                  ul.appendChild(li);
             }
         }
@@ -347,7 +344,7 @@ function disconnectVoiceRoom() {
     
     socket.emit('join-voice-room', null); 
     voiceChannels.forEach(c => c.classList.remove('active'));
-    voiceConnectionInfo.style.display = 'none'; // Alt paneldeki bilgiyi gizle
+    voiceConnectionInfo.style.display = 'none'; 
     currentVoiceRoom = null;
     audioContainer.innerHTML = ''; 
 }
@@ -360,7 +357,7 @@ function playRemoteAudio(stream, peerId) {
         audioContainer.appendChild(ad);
     }
     ad.srcObject = stream;
-    ad.muted = isDeafened; // Girdiğinde ben sağırsam onun sesi duyulmasın
+    ad.muted = isDeafened;
 }
 function removeRemoteAudio(peerId) {
     const ad = document.getElementById('audio-' + peerId);
@@ -368,7 +365,7 @@ function removeRemoteAudio(peerId) {
 }
 
 // -----------------------------------------
-// VAD - Yeşil Halka Tespiti
+// VAD
 // -----------------------------------------
 function initAudioContext() {
     if(!audioContext) {
@@ -401,12 +398,9 @@ function checkSpeechLooped() {
         for(let i=0; i<dataArray.length; i++) sum += dataArray[i];
         let average = sum / dataArray.length;
         
-        // Susturulmuşsam algılamayı kapat
         if(id === myPeerId && isMicMuted) average = 0;
 
         const circle = document.getElementById('voice-user-avatar-' + id);
-        // Hem bende hem küçük listede avatar varsa eşzamanlı parlamaları çok şık olurdu ama 
-        // kendi büyük avatarıma da entegre edelim
         if(id === myPeerId) {
             if(average > 10) myAvatar.classList.add('speaking');
             else myAvatar.classList.remove('speaking');
