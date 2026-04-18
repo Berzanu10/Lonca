@@ -2,9 +2,9 @@ const socket = io('/');
 let peer;
 let myPeerId;
 let myUsername;
-let localStream;
-let currentCall;
-let currentRoom = 'genel'; // Varsayılan oda
+let localStream = null;
+let currentCall = null;
+let currentRoom = 'genel';
 
 // DOM Elementleri
 const loginScreen = document.getElementById('login-screen');
@@ -17,62 +17,31 @@ const messages = document.getElementById('messages');
 const chatForm = document.getElementById('chat-form');
 const chatInput = document.getElementById('chat-input');
 
+const videoModal = document.getElementById('video-modal');
 const videoGrid = document.getElementById('video-grid');
-const localVideo = document.getElementById('local-video');
 const hangupBtn = document.getElementById('hangup-btn');
-const localLabel = document.getElementById('local-label');
 const currentRoomName = document.getElementById('current-room-name');
 const channels = document.querySelectorAll('.channel');
 
-let users = {};
+let users = {}; // Odadaki diğer kullanıcılar: peerId -> username
 
 joinBtn.addEventListener('click', () => {
     const name = usernameInput.value.trim();
     if (name) {
         myUsername = name;
-        localLabel.textContent = `${myUsername} (Sen)`;
         startApp();
+    } else {
+        alert("Lütfen bir takma ad girin!");
     }
 });
 
 function startApp() {
+    // 1. Ekranları değiştir (Giriş yapamıyorum hatasının asıl çözümü: gereksiz yere baştan kamera istememek!)
     loginScreen.style.display = 'none';
     appContainer.style.display = 'flex';
-
-    // 1. Kamera izni için kesin hata yönetimi:
-    // https veya localhost olmadığında medya aygıtlarına ulaşılamaz.
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        alert("Kamera/Mikrofon API'sine erişilemedi.\n\nDİKKAT! Eğer siteyi 192.168... gibi bir IP üzerinden telefondan ya da başka PC'den açıyorsanız, tarayıcılar güvenlik gereği kamera erişimini HTTPS olmadığı için engeller. Sadece cihazınız üzerinde (localhost) açarak ya da HTTPS üzerinden kullanabilirsiniz.");
-        initializePeer();
-        return;
-    }
-
-    // Kamera/Mikrofon izni isteme
-    navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true
-    }).then(stream => {
-        localStream = stream;
-        localVideo.srcObject = stream;
-        initializePeer();
-    }).catch(err => {
-        console.error('Donanım erişim hatası:', err);
-        let reason = "Bilinmeyen bir hata oluştu.";
-        
-        // Cihaza özel hata açıklamaları:
-        if(err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-            reason = "Aygıtınızda takılı (veya çalışır durumda) herhangi bir kamera/mikrofon bulunamadı.";
-        } else if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-            reason = "Tarayıcınızda veya bilgisayarınızda kamera/mikrofon iznini engellediniz/reddettiniz.";
-        } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
-             reason = "Kameranız şu anda Chrome/Firefox haricinde başka bir uygulama (Zoom, Discord vb.) tarafından kullanılıyor.";
-        }
-        
-        alert("Medya Hatası Detayı: " + reason + "\n\nEndişelenmeyin! Kamera/mikrofonunuzu kullanmadan sadece metin sohbeti yapmak için odalara yönlendiriliyorsunuz.");
-        
-        // Kamera olmadan devam ediyoruz
-        initializePeer();
-    });
+    
+    // Uygulama anında başlar, kamera anında kapanmaz veya izine takılıp donmaz.
+    initializePeer();
 }
 
 function initializePeer() {
@@ -87,46 +56,63 @@ function initializePeer() {
         joinRoom(currentRoom);
     });
 
-    peer.on('call', call => {
+    peer.on('call', async call => {
         const callerId = call.peer;
         const callerName = users[callerId] || 'Birisi';
         
         const accept = window.confirm(`${callerName} adlı kişi bu odada sizi görüntülü arıyor. Kabul ediyor musunuz?`);
         if (accept) {
-            // Sadece kameramız (stream) varsa ver, yoksa da deniyoruz ama peerjs boş gönderebilir
-            call.answer(localStream); 
-            currentCall = call;
-            
-            call.on('stream', userVideoStream => {
-                addRemoteVideo(userVideoStream, callerId, callerName);
-            });
-            call.on('close', () => {
-                removeRemoteVideo(callerId);
-            });
+            try {
+                // Kamera iznini SADECE çağrıyı kabul edersen istiyoruz.
+                if (!localStream) {
+                    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                }
+                
+                call.answer(localStream); 
+                currentCall = call;
+                openVideoModal();
+                
+                addVideoStream(localStream, 'local', 'Siz (Yerel)');
+
+                call.on('stream', userVideoStream => {
+                    addVideoStream(userVideoStream, callerId, callerName);
+                });
+
+                call.on('close', () => {
+                    endLocalCall();
+                });
+            } catch (err) {
+                 console.error(err);
+                 alert("Kameranıza/mikrofonunuza ulaşılamadığı için çağrı yanıtlanamadı! (Lütfen tarayıcı izinlerini kontrol edin)");
+            }
+        }
+    });
+
+    peer.on('error', err => {
+        console.error('PeerJS Hatası:', err);
+        if (err.type === 'peer-unavailable') {
+             alert("Bu kullanıcı şu an müsait değil veya sayfayı yenilemiş olabilir.");
+             endLocalCall();
         }
     });
 }
 
-// 2. Çoklu Kanal Mantığı: Kanallar Arası Geçiş
+// ODA DEĞİŞİMİ
 channels.forEach(channel => {
     channel.addEventListener('click', () => {
         const newRoom = channel.getAttribute('data-room');
         if(newRoom !== currentRoom) {
-            // Aktif CSS sınıfını taşı
             channels.forEach(c => c.classList.remove('active'));
             channel.classList.add('active');
             
             currentRoom = newRoom;
             currentRoomName.textContent = `# ${newRoom}`;
             
-            // Farklı odaya geçersek, var olan arama otomatik sonlanmalı
+            // Aramadayken oda değiştirilirse görüşmeyi kapat
             if (currentCall) {
-                currentCall.close();
-                currentCall = null;
-                document.querySelectorAll('.video-wrapper.remote').forEach(r => r.remove());
+                endLocalCall();
             }
 
-            // Yeni odaya katıl
             joinRoom(currentRoom);
         }
     });
@@ -135,19 +121,15 @@ channels.forEach(channel => {
 function joinRoom(room) {
     if(!myPeerId) return;
 
-    // Chat temizliği
     messages.innerHTML = '';
-    // Kişi listesi temizliği
     usersList.innerHTML = '';
     users = {};
     
-    appendMessage('sistem', `Sen `#${room}` adlı odaya geçiş yaptın.`);
-    
-    // Sunucuya odaya girdiğimizi haber ver
+    appendMessage('sistem', `Sen #${room} adlı kanala bağlandın.`);
     socket.emit('join-room', room, myPeerId, myUsername);
 }
 
-// 3. Socket.io Event'leri
+// SOCKET EVENTLERİ
 socket.on('user-connected', (peerId, username) => {
     appendMessage('sistem', `${username} numaralı odaya katıldı.`);
     users[peerId] = username;
@@ -160,12 +142,10 @@ socket.on('user-disconnected', (peerId) => {
         appendMessage('sistem', `${name} bu odadan ayrıldı.`);
         delete users[peerId];
         updateUsersList();
-        removeRemoteVideo(peerId);
         
-        // Gören kişi kendi aramamız ise
-        if(currentCall && currentCall.peer === peerId) {
-             currentCall.close();
-             currentCall = null;
+        if (currentCall && currentCall.peer === peerId) {
+             endLocalCall();
+             appendMessage('sistem', `Karşı taraf çıktığı için arama sonlandı.`);
         }
     }
 });
@@ -175,9 +155,7 @@ socket.on('current-users', (activeUsers) => {
     updateUsersList();
 });
 
-// Metin Sohbeti
 socket.on('create-message', (message, senderName) => {
-    // Sadece bulunduğumuz odadaki mesajlar server'dan gelecektir
     appendMessage(senderName, message);
 });
 
@@ -185,7 +163,7 @@ chatForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const msg = chatInput.value.trim();
     if (msg) {
-        socket.emit('chat-message', msg); // Sunucu geldiği odayı Socket API ile kendisi biliyor
+        socket.emit('chat-message', msg); 
         chatInput.value = '';
     }
 });
@@ -193,18 +171,15 @@ chatForm.addEventListener('submit', (e) => {
 function appendMessage(sender, msg) {
     const div = document.createElement('div');
     div.classList.add('message');
-    if(sender === 'sistem') {
-        div.classList.add('system');
-    } else if(sender === myUsername) {
-        div.classList.add('mine');
-    }
+    if(sender === 'sistem') div.classList.add('system');
+    else if(sender === myUsername) div.classList.add('mine');
     
     div.innerHTML = `<strong>${sender}:</strong> <span>${msg}</span>`;
     messages.appendChild(div);
     messages.scrollTop = messages.scrollHeight;
 }
 
-// Sağ Kullanıcı Listesi Çizimi
+// SAĞ PANEL: SADECE KULLANICI LİSTELERİ
 function updateUsersList() {
     usersList.innerHTML = '';
     let userCount = 0;
@@ -213,12 +188,15 @@ function updateUsersList() {
         if (id !== myPeerId) {
             userCount++;
             const li = document.createElement('li');
-            li.textContent = users[id];
+            
+            const span = document.createElement('span');
+            span.textContent = users[id];
             
             const callBtn = document.createElement('button');
             callBtn.innerHTML = "Ara 📹";
             callBtn.onclick = () => initiateCall(id);
             
+            li.appendChild(span);
             li.appendChild(callBtn);
             usersList.appendChild(li);
         }
@@ -226,7 +204,7 @@ function updateUsersList() {
     
     if (userCount === 0) {
         const li = document.createElement('li');
-        li.textContent = "(Kimse Yok)";
+        li.textContent = "(Aramaya hazır kimse yok)";
         li.style.color = 'var(--text-muted)';
         li.style.fontStyle = 'italic';
         li.style.background = 'transparent';
@@ -234,39 +212,73 @@ function updateUsersList() {
     }
 }
 
-// 4. Çağrı Başlatma
-function initiateCall(peerId) {
-    if (!localStream) {
-        alert("Üzgünüz, kameranıza veya mikrofonunuza erişim sağlayamadığımız (veya izin vermediğiniz) için arama başlatamazsınız!");
+// GÖRÜNTÜLÜ GÖRÜŞME FONKSİYONLARI (MODAL DESTEKLİ)
+async function initiateCall(peerId) {
+    appendMessage('sistem', `${users[peerId]} adlı kişiye ulaşılmaya çalışılıyor...`);
+    
+    try {
+        if (!localStream) {
+            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        }
+    } catch(err) {
+        alert("Kameranıza erişim sağlanamadı. Lütfen cihaz izinlerini kontrol edin veya kameranızı takın.");
         return;
     }
-    
-    appendMessage('sistem', `${users[peerId]} adlı kişi aranıyor...`);
-    
+
     const call = peer.call(peerId, localStream);
     currentCall = call;
     
+    openVideoModal();
+    addVideoStream(localStream, 'local', 'Sen');
+    
     call.on('stream', userVideoStream => {
-        addRemoteVideo(userVideoStream, peerId, users[peerId]);
+        addVideoStream(userVideoStream, peerId, users[peerId]);
     });
     
     call.on('close', () => {
-        removeRemoteVideo(peerId);
-        appendMessage('sistem', `Görüntülü görüşmeniz sonlandı.`);
+        endLocalCall();
+        appendMessage('sistem', `Görüşmeniz sonlandırıldı.`);
     });
 }
 
-function addRemoteVideo(stream, peerId, username) {
+function openVideoModal() {
+    videoModal.style.display = 'flex';
+}
+
+function endLocalCall() {
+    if (currentCall) {
+        currentCall.close();
+        currentCall = null;
+    }
+    // Lokal kamerayı komple kapat ki bilgisayardaki kamera ışığı sönsün!
+    if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+    }
+    videoGrid.innerHTML = ''; 
+    videoModal.style.display = 'none'; 
+}
+
+hangupBtn.addEventListener('click', () => {
+    endLocalCall();
+    appendMessage('sistem', `Aramayı kapattınız.`);
+});
+
+function addVideoStream(stream, peerId, username) {
     if (document.getElementById(`wrapper-${peerId}`)) return;
 
     const videoWrapper = document.createElement('div');
     videoWrapper.id = `wrapper-${peerId}`;
-    videoWrapper.className = 'video-wrapper remote';
+    videoWrapper.className = 'video-wrapper';
     
     const video = document.createElement('video');
     video.srcObject = stream;
     video.autoplay = true;
     video.playsInline = true;
+    if(peerId === 'local') {
+        video.muted = true; // Kendi sesinizi kendinize yankılatmayın
+        video.style.transform = 'scaleX(-1)';
+    }
     
     const label = document.createElement('span');
     label.className = 'video-label';
@@ -276,22 +288,3 @@ function addRemoteVideo(stream, peerId, username) {
     videoWrapper.appendChild(label);
     videoGrid.appendChild(videoWrapper);
 }
-
-function removeRemoteVideo(peerId) {
-    const videoWrapper = document.getElementById(`wrapper-${peerId}`);
-    if (videoWrapper) {
-        videoWrapper.remove();
-    }
-}
-
-hangupBtn.addEventListener('click', () => {
-    if (currentCall) {
-        currentCall.close();
-        currentCall = null;
-        
-        document.querySelectorAll('.video-wrapper.remote').forEach(r => r.remove());
-        appendMessage('sistem', `Aktif görüşmeyi sonlandırdınız.`);
-    } else {
-        alert("Şu anda kapattığınız aktif bir aramanız bulunmuyor.");
-    }
-});

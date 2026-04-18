@@ -76,7 +76,7 @@ body {
 }
 
 .sidebar {
-  width: 260px;
+  width: 220px;
   background-color: var(--sidebar-color);
   padding: 1rem;
   display: flex;
@@ -86,7 +86,7 @@ body {
 .channel-section {
   margin-bottom: 1.5rem;
 }
-.channel-section h3, .users-section h3 {
+.channel-section h3 {
   margin-bottom: 0.8rem;
   font-size: 0.8rem;
   text-transform: uppercase;
@@ -110,8 +110,18 @@ body {
   color: #fff;
 }
 .channel.active {
-  background: rgba(255,255,255,0.08); /* Highlight for current channel */
+  background: rgba(255,255,255,0.08);
   color: #fff;
+}
+
+/* TAMAMEN YENİ SAĞ KULLANICI LİSTESİ */
+.right-sidebar {
+  width: 260px;
+  background-color: var(--sidebar-color);
+  border-left: 1px solid var(--panel-color);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
 }
 
 .users-section {
@@ -120,13 +130,21 @@ body {
   flex-grow: 1;
   overflow: hidden;
 }
+.users-section h3 {
+  margin-bottom: 0.8rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
 #users-list {
   list-style: none;
   flex-grow: 1;
   overflow-y: auto;
 }
 #users-list li {
-  padding: 0.7rem;
+  padding: 0.8rem;
   margin-bottom: 0.5rem;
   border-radius: 4px;
   background-color: rgba(255,255,255,0.02);
@@ -134,7 +152,7 @@ body {
   justify-content: space-between;
   align-items: center;
   transition: background-color 0.2s ease;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
 }
 #users-list li:hover {
   background-color: rgba(255,255,255,0.05);
@@ -143,10 +161,10 @@ body {
   background-color: var(--success-color);
   border: none;
   color: #fff;
-  padding: 0.3rem 0.6rem;
+  padding: 0.4rem 0.6rem;
   border-radius: 3px;
   cursor: pointer;
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   font-weight: bold;
   transition: opacity 0.2s;
 }
@@ -154,12 +172,12 @@ body {
   opacity: 0.85;
 }
 
+/* ORTA SOHBET BÖLÜMÜ */
 .main-content {
   flex-grow: 1;
   display: flex;
   flex-direction: column;
   background-color: var(--chat-bg);
-  border-right: 1px solid var(--panel-color);
 }
 .room-header {
   padding: 1.2rem 1.5rem;
@@ -248,37 +266,50 @@ body {
   background-color: #4752c4;
 }
 
-.video-section {
-  width: 320px;
-  background-color: var(--sidebar-color);
-  padding: 1rem;
+/* YENİ GÖRÜNTÜLÜ GÖRÜŞME MODALI */
+#video-modal {
+  position: fixed;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.85); /* Arkası blur/karanlık */
+  display: flex; justify-content: center; align-items: center;
+  z-index: 1000;
+}
+
+.video-modal-content {
+  background: var(--panel-color);
+  padding: 1.5rem;
+  border-radius: var(--border-radius);
+  width: 90%;
+  max-width: 1000px;
   display: flex;
   flex-direction: column;
+  gap: 1.5rem;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.9);
 }
-.video-section h3 {
-  margin-bottom: 1rem;
+
+.video-modal-content h3 {
   text-align: center;
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  letter-spacing: 0.5px;
+  color: #fff;
+  font-size: 1.3rem;
 }
+
 #video-grid {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 1rem;
-  flex-grow: 1;
-  overflow-y: auto;
+  width: 100%;
 }
+
 .video-wrapper {
   position: relative;
   width: 100%;
-  padding-bottom: 56.25%;
+  padding-bottom: 75%; /* 4:3 Aspect Ratio */
   background-color: #000;
   border-radius: var(--border-radius);
   overflow: hidden;
-  box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.4);
 }
+
 .video-wrapper video {
   position: absolute;
   top: 0;
@@ -286,40 +317,37 @@ body {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transform: scaleX(-1); /* Ayna efekti (ilk kamerada) */
 }
-.video-wrapper.remote video {
-  transform: none; /* Karşının kamerasını ayna yapma */
-}
+
 .video-label {
   position: absolute;
   bottom: 8px;
   left: 8px;
-  background-color: rgba(0,0,0,0.6);
-  padding: 4px 8px;
+  background-color: rgba(0,0,0,0.7);
+  padding: 4px 10px;
   border-radius: 4px;
-  font-size: 0.75rem;
+  font-size: 0.9rem;
   font-weight: bold;
 }
+
 .video-controls {
-  margin-top: 1rem;
+  margin-top: 0.5rem;
   display: flex;
-  gap: 0.5rem;
+  justify-content: center;
 }
+
 .video-controls button {
-  flex: 1;
-  padding: 1rem;
+  padding: 1rem 3rem;
   border: none;
   border-radius: var(--border-radius);
   cursor: pointer;
   font-weight: bold;
-  font-size: 0.9rem;
+  font-size: 1.1rem;
   transition: background-color 0.2s;
-}
-.video-controls .danger {
   background-color: var(--danger-color);
   color: white;
 }
-.video-controls .danger:hover {
+
+.video-controls button:hover {
   background-color: #c93639;
 }

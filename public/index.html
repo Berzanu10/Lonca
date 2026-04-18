@@ -6,7 +6,6 @@
   <title>Lonca</title>
   <link rel="stylesheet" href="style.css">
   <script src="/socket.io/socket.io.js"></script>
-  <!-- PeerJS kütüphanesi -->
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 </head>
 <body>
@@ -21,10 +20,8 @@
   <!-- Ana Uygulama Arayüzü -->
   <div id="app-container" style="display: none;">
     
-    <!-- Sol Tarafta Kanallar ve Aktif Kullanıcı Listesi -->
+    <!-- Sol Tarafta Kanallar -->
     <div class="sidebar">
-      
-      <!-- Yeni Eklenen Çoklu Oda (Kanal) Menüsü -->
       <div class="channel-section">
         <h3>Kanallar</h3>
         <ul id="channels-list">
@@ -33,12 +30,6 @@
           <li class="channel" data-room="muzik"># müzik</li>
         </ul>
       </div>
-
-      <div class="users-section">
-        <h3>Bu Odadakiler</h3>
-        <ul id="users-list"></ul>
-      </div>
-
     </div>
     
     <!-- Ortada Metin Sohbeti Alanı -->
@@ -55,20 +46,27 @@
       </div>
     </div>
 
-    <!-- Sağ Tarafta WebRTC Görüntülü Görüşme Panelleri -->
-    <div class="video-section">
-      <h3>Görüntülü Görüşme</h3>
-      <div id="video-grid">
-         <div class="video-wrapper local">
-            <video id="local-video" muted autoplay playsinline></video>
-            <span class="video-label" id="local-label">Sen</span>
-         </div>
-      </div>
-      <div class="video-controls">
-         <button id="hangup-btn" class="danger">Aramayı Sonlandır</button>
+    <!-- Sağ Tarafta Aktif Kullanıcı Listesi (Kamera alanı kaldırıldı) -->
+    <div class="right-sidebar">
+      <div class="users-section">
+         <h3>Bu Odadakiler</h3>
+         <ul id="users-list"></ul>
       </div>
     </div>
 
+  </div>
+
+  <!-- Görüntülü Görüşme Penceresi (SADECE BİRİNİ ARADIĞINIZDA AÇILIR) -->
+  <div id="video-modal" style="display: none;">
+     <div class="video-modal-content">
+        <h3>📹 Aktif Görüntülü Görüşme</h3>
+        <div id="video-grid">
+           <!-- Katılımcı Videoları Dinamik Olarak Buraya Düşecek -->
+        </div>
+        <div class="video-controls">
+           <button id="hangup-btn" class="danger">Aramayı Sonlandır</button>
+        </div>
+     </div>
   </div>
 
   <script src="script.js"></script>
