@@ -1,0 +1,14 @@
+{
+  "name": "lonca",
+  "version": "1.0.0",
+  "description": "Özel mini-Discord web uygulaması (Chat ve P2P Görüntülü Görüşme)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "peer": "^1.0.2",
+    "socket.io": "^4.7.4"
+  }
+}

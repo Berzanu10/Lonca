@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lonca</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="/socket.io/socket.io.js"></script>
+  <!-- PeerJS kütüphanesi -->
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+</head>
+<body>
+
+  <!-- Giriş Ekranı -->
+  <div id="login-screen">
+    <h2>Lonca'ya Hoş Geldin</h2>
+    <input type="text" id="username-input" placeholder="Takma adınızı girin..." autocomplete="off">
+    <button id="join-btn">Sunucuya Katıl</button>
+  </div>
+
+  <!-- Ana Uygulama Arayüzü -->
+  <div id="app-container" style="display: none;">
+    
+    <!-- Sol Tarafta Aktif Kullanıcı Listesi -->
+    <div class="sidebar">
+      <h3>Kullanıcılar</h3>
+      <ul id="users-list"></ul>
+    </div>
+    
+    <!-- Ortada Metin Sohbeti Alanı -->
+    <div class="main-content">
+      <div class="chat-section">
+        <div id="messages"></div>
+        <form id="chat-form">
+           <input type="text" id="chat-input" placeholder="Odaya mesaj yaz..." autocomplete="off">
+           <button type="submit">Gönder</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Sağ Tarafta WebRTC Görüntülü Görüşme Panelleri -->
+    <div class="video-section">
+      <h3>Görüntülü Görüşme</h3>
+      <div id="video-grid">
+         <!-- Lokal kullanıcı (Sizin) kameranız -->
+         <div class="video-wrapper local">
+            <video id="local-video" muted autoplay playsinline></video>
+            <span class="video-label" id="local-label">Sen</span>
+         </div>
+      </div>
+      <div class="video-controls">
+         <button id="hangup-btn" class="danger">Görüşmeyi Sonlandır</button>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
