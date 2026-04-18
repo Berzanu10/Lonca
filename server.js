@@ -17,17 +17,13 @@ const voiceRooms = { 'sohbet': {}, 'oyun': {}, 'sessiz': {} };
 const allTimeUsers = {}; 
 
 io.on('connection', (socket) => {
-  let clientIp = socket.handshake.headers['x-forwarded-for'] || socket.conn.remoteAddress || 'unknown';
-  if(clientIp && clientIp.includes(',')) clientIp = clientIp.split(',')[0];
-  
-  socket.clientIp = clientIp;
   socket.voiceState = { mic: true, deaf: false }; // Kullanıcının varsayılan donanım durumu
 
   socket.on('register', (peerId, username) => {
      socket.peerId = peerId;
      socket.username = username;
      
-     allTimeUsers[socket.clientIp] = {
+     allTimeUsers[peerId] = {
          username: username,
          isOnline: true,
          peerId: peerId
@@ -102,10 +98,8 @@ io.on('connection', (socket) => {
        io.emit('voice-rooms-state', voiceRooms);
     }
     
-    if(socket.peerId && allTimeUsers[socket.clientIp]) {
-       if(allTimeUsers[socket.clientIp].peerId === socket.peerId) {
-           allTimeUsers[socket.clientIp].isOnline = false;
-       }
+    if(socket.peerId && allTimeUsers[socket.peerId]) {
+       allTimeUsers[socket.peerId].isOnline = false;
        io.emit('global-users', allTimeUsers);
     }
   });

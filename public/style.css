@@ -147,10 +147,12 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
 .main-content { flex-grow: 1; display: flex; flex-direction: column; background-color: var(--chat-bg); }
 .room-header { padding: 1.2rem 1.5rem; border-bottom: 1px solid var(--panel-color); box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
 .chat-section { flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; }
-#messages { flex-grow: 1; padding: 1.5rem; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem; }
-.message { padding: 0.8rem; border-radius: 6px; max-width: 80%; }
-.message.mine { align-self: flex-end; background-color: #4f545c; text-align: right; border-radius: 8px 8px 0 8px; }
-.message:not(.mine) { align-self: flex-start; background-color: var(--sidebar-color); border-radius: 8px 8px 8px 0; }
+#messages { flex-grow: 1; padding: 1.5rem 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.message { padding: 4px 24px; display: flex; flex-direction: row; font-size: 1rem; line-height: 1.4; }
+.message:hover { background-color: rgba(255, 255, 255, 0.03); }
+.message strong { color: #fff; margin-right: 8px; font-weight: 500; flex-shrink: 0; }
+.message.mine strong { color: #43b581; }
+.message span { color: #dcddde; word-wrap: break-word; }
 
 #chat-form { padding: 1.5rem; display: flex; gap: 1rem; background-color: var(--chat-bg); }
 #chat-input { flex-grow: 1; padding: 1rem; border-radius: 4px; border: none; background-color: var(--input-bg); color: #fff; }
