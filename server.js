@@ -6,7 +6,6 @@ const { Server } = require("socket.io");
 const io = new Server(server);
 const { ExpressPeerServer } = require('peer');
 
-// PeerJS signalleme sunucusu
 const peerServer = ExpressPeerServer(server, {
   debug: true,
   path: '/'
@@ -15,64 +14,89 @@ const peerServer = ExpressPeerServer(server, {
 app.use('/peerjs', peerServer);
 app.use(express.static('public'));
 
-// Odalardaki kullanıcıları tutuyoruz: roomName -> { peerId: username }
-const rooms = {
-  'genel': {},
-  'oyun': {},
-  'muzik': {}
-};
+// İki farklı kanal yapısı: Metin ve Ses
+const textRooms = { 'genel': {}, 'oyun': {}, 'muzik': {} };
+const voiceRooms = { 'sohbet': {}, 'oyun': {}, 'sessiz': {} };
 
 io.on('connection', (socket) => {
   
-  socket.on('join-room', (roomId, peerId, username) => {
-    // Eger belirtilen oda ilk defa oluşturuluyorsa (esneklik açısından)
-    if (!rooms[roomId]) rooms[roomId] = {};
-    
-    // Kullanıcı zaten başka bir odadaysa, önce o odadan çıkart
-    if (socket.roomId && socket.roomId !== roomId) {
-       socket.leave(socket.roomId);
-       if (rooms[socket.roomId]) {
-           delete rooms[socket.roomId][socket.peerId];
+  // Ana Kullanıcı Kaydı Eşleştirmesi
+  socket.on('register', (peerId, username) => {
+     socket.peerId = peerId;
+     socket.username = username;
+     
+     // Sadece sesli odaların anlık listesini herkese Sidebar için yolla
+     socket.emit('voice-rooms-state', voiceRooms);
+  });
+
+  // ========== METİN KANALLARI MANTIĞI ==========
+  socket.on('join-text-room', (roomId) => {
+    // Eski bir metin kanalında ise çıkış yapalım
+    if (socket.textRoom) {
+       socket.leave('text-' + socket.textRoom);
+       if (textRooms[socket.textRoom]) {
+           delete textRooms[socket.textRoom][socket.peerId];
        }
-       socket.to(socket.roomId).emit('user-disconnected', socket.peerId);
+       socket.to('text-' + socket.textRoom).emit('text-user-disconnected', socket.peerId);
     }
-
-    // Yeni odaya ekle
-    socket.join(roomId);
-    rooms[roomId][peerId] = username;
     
-    // Bağlantı nesnesi üzerine bilgileri kopyala
-    socket.peerId = peerId;
-    socket.roomId = roomId;
-    socket.username = username;
-
-    // Bağlanılan odadaki güncel kullanıcı listesini sadece bağlanana gönder
-    socket.emit('current-users', rooms[roomId]);
+    // Yeni kanala uye yap
+    socket.textRoom = roomId;
+    if(!textRooms[roomId]) textRooms[roomId] = {};
+    textRooms[roomId][socket.peerId] = socket.username;
     
-    // Odadaki diğerlerine yeni birinin girdiğini haber ver
-    socket.to(roomId).emit('user-connected', peerId, username);
+    socket.join('text-' + roomId);
+    // Oda bilgisini dön
+    socket.emit('text-current-users', textRooms[roomId]);
+    socket.to('text-' + roomId).emit('text-user-connected', socket.peerId, socket.username);
   });
 
-  // Gelen chat mesajlarını sadece kişinin bulunduğu odaya yolla
   socket.on('chat-message', (message) => {
-    if(socket.roomId && socket.username) {
-        // io.to, mesajı gönderen dahil odadaki herkese iletir (böylece mesaj başarılıysa geri ona da düşer)
-        io.to(socket.roomId).emit('create-message', message, socket.username);
+    if(socket.textRoom && socket.username) {
+        // io.to, bu özel prefix'li odadaki herkese (kendisi dahil) yayınlar
+        io.to('text-' + socket.textRoom).emit('create-message', message, socket.username);
     }
   });
 
-  // Bağlantı koptuğunda
+  // ========== SES KANALLARI MANTIĞI ==========
+  socket.on('join-voice-room', (roomId) => {
+     // Eski sesten cikis
+     if(socket.voiceRoom) {
+         socket.leave('voice-' + socket.voiceRoom);
+         if(voiceRooms[socket.voiceRoom]) {
+             delete voiceRooms[socket.voiceRoom][socket.peerId];
+         }
+     }
+     
+     socket.voiceRoom = roomId;
+     if (roomId) { // Kullanıcı odayı kapat butonuna basmadıysa ID ile gelmiştir
+         if(!voiceRooms[roomId]) voiceRooms[roomId] = {};
+         
+         // Yeni giriş yapan kişiye içerideki eski elemanların listesini veriyoruz (P2P Mesh ses araması kurması için)
+         socket.emit('voice-join-success', voiceRooms[roomId]);
+         
+         voiceRooms[roomId][socket.peerId] = socket.username;
+         socket.join('voice-' + roomId);
+     }
+     
+     // Sağ/Sol menü için tüm ağa anlık sesli kanal mevcudiyetini yayınla
+     io.emit('voice-rooms-state', voiceRooms);
+  });
+
+  // ========== BAĞLANTI KOPMASI ==========
   socket.on('disconnect', () => {
-    if (socket.roomId && socket.peerId) {
-      if(rooms[socket.roomId]) {
-         delete rooms[socket.roomId][socket.peerId];
-      }
-      socket.to(socket.roomId).emit('user-disconnected', socket.peerId);
+    if(socket.textRoom && socket.peerId) {
+       if(textRooms[socket.textRoom]) delete textRooms[socket.textRoom][socket.peerId];
+       socket.to('text-' + socket.textRoom).emit('text-user-disconnected', socket.peerId);
+    }
+    if(socket.voiceRoom && socket.peerId) {
+       if(voiceRooms[socket.voiceRoom]) delete voiceRooms[socket.voiceRoom][socket.peerId];
+       io.emit('voice-rooms-state', voiceRooms); // Herkeste sidebar'ı güncelle ki odadan silinsin
     }
   });
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Lonca Sunucusu Başladı! Web tarayıcınızda http://localhost:${PORT} adresine gidin.`);
+  console.log(`Sunucu Başladı: http://localhost:${PORT}`);
 });

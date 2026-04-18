@@ -76,15 +76,16 @@ body {
 }
 
 .sidebar {
-  width: 220px;
+  width: 250px; /* Genişletildi */
   background-color: var(--sidebar-color);
   padding: 1rem;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
 
 .channel-section {
-  margin-bottom: 1.5rem;
+  margin-bottom: 0.5rem;
 }
 .channel-section h3 {
   margin-bottom: 0.8rem;
@@ -93,11 +94,10 @@ body {
   color: var(--text-muted);
   letter-spacing: 0.5px;
 }
-#channels-list {
+#text-channels-list, #voice-channels-list {
   list-style: none;
 }
 .channel {
-  padding: 0.6rem;
   margin-bottom: 0.3rem;
   border-radius: 4px;
   cursor: pointer;
@@ -105,16 +105,67 @@ body {
   font-weight: 600;
   transition: background 0.2s, color 0.2s;
 }
-.channel:hover {
+
+/* Sadece text kanallarına tıklandığındaki renkler */
+.text-channel {
+  padding: 0.6rem;
+}
+.text-channel:hover {
   background: rgba(255,255,255,0.03);
   color: #fff;
 }
-.channel.active {
+.text-channel.active {
   background: rgba(255,255,255,0.08);
   color: #fff;
 }
 
-/* TAMAMEN YENİ SAĞ KULLANICI LİSTESİ */
+/* Ses Kanalları Stilleri (Discord Tarzı İç İçe) */
+.voice-channel {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  background: transparent !important; /* Altında liste çıkacağı için dış bg transparan */
+}
+.voice-channel-header {
+  padding: 0.6rem;
+  border-radius: 4px;
+  width: 100%;
+  transition: background 0.2s, color 0.2s;
+}
+.voice-channel-header:hover {
+  background: rgba(255,255,255,0.03);
+  color: #fff;
+}
+.voice-channel.active .voice-channel-header {
+  color: #3ba55c; /* Ses odasında aktifken yeşil yanar */
+}
+.voice-users {
+  list-style: none;
+  padding-left: 1.8rem;
+  width: 100%;
+}
+.voice-users li {
+  padding: 0.3rem 0;
+  font-size: 0.85rem;
+  color: #b9bbbe;
+  display: flex;
+  align-items: center;
+}
+
+.danger-btn {
+  background: var(--danger-color);
+  color: white;
+  border: none;
+  padding: 0.8rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+}
+.danger-btn:hover {
+  background: #c93639;
+}
+
+/* SAĞ TARAF (Özel Arama Listesi) */
 .right-sidebar {
   width: 260px;
   background-color: var(--sidebar-color);
@@ -131,7 +182,7 @@ body {
   overflow: hidden;
 }
 .users-section h3 {
-  margin-bottom: 0.8rem;
+  margin-bottom: 0.2rem;
   font-size: 0.8rem;
   text-transform: uppercase;
   color: var(--text-muted);
@@ -144,7 +195,7 @@ body {
   overflow-y: auto;
 }
 #users-list li {
-  padding: 0.8rem;
+  padding: 0.7rem;
   margin-bottom: 0.5rem;
   border-radius: 4px;
   background-color: rgba(255,255,255,0.02);
@@ -161,10 +212,10 @@ body {
   background-color: var(--success-color);
   border: none;
   color: #fff;
-  padding: 0.4rem 0.6rem;
+  padding: 0.3rem 0.6rem;
   border-radius: 3px;
   cursor: pointer;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   font-weight: bold;
   transition: opacity 0.2s;
 }
@@ -172,7 +223,7 @@ body {
   opacity: 0.85;
 }
 
-/* ORTA SOHBET BÖLÜMÜ */
+/* ORTA BÖLÜM (Chat) */
 .main-content {
   flex-grow: 1;
   display: flex;
@@ -266,11 +317,11 @@ body {
   background-color: #4752c4;
 }
 
-/* YENİ GÖRÜNTÜLÜ GÖRÜŞME MODALI */
+/* VİDEO MODALI (Özel arama için) */
 #video-modal {
   position: fixed;
   top: 0; left: 0; width: 100%; height: 100%;
-  background: rgba(0,0,0,0.85); /* Arkası blur/karanlık */
+  background: rgba(0,0,0,0.85); 
   display: flex; justify-content: center; align-items: center;
   z-index: 1000;
 }
@@ -303,7 +354,7 @@ body {
 .video-wrapper {
   position: relative;
   width: 100%;
-  padding-bottom: 75%; /* 4:3 Aspect Ratio */
+  padding-bottom: 75%;
   background-color: #000;
   border-radius: var(--border-radius);
   overflow: hidden;
@@ -312,17 +363,13 @@ body {
 
 .video-wrapper video {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  top: 0; left: 0; width: 100%; height: 100%;
   object-fit: cover;
 }
 
 .video-label {
   position: absolute;
-  bottom: 8px;
-  left: 8px;
+  bottom: 8px; left: 8px;
   background-color: rgba(0,0,0,0.7);
   padding: 4px 10px;
   border-radius: 4px;
@@ -334,20 +381,4 @@ body {
   margin-top: 0.5rem;
   display: flex;
   justify-content: center;
-}
-
-.video-controls button {
-  padding: 1rem 3rem;
-  border: none;
-  border-radius: var(--border-radius);
-  cursor: pointer;
-  font-weight: bold;
-  font-size: 1.1rem;
-  transition: background-color 0.2s;
-  background-color: var(--danger-color);
-  color: white;
-}
-
-.video-controls button:hover {
-  background-color: #c93639;
 }
