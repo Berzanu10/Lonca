@@ -21,18 +21,35 @@
   <!-- Ana Uygulama Arayüzü -->
   <div id="app-container" style="display: none;">
     
-    <!-- Sol Tarafta Aktif Kullanıcı Listesi -->
+    <!-- Sol Tarafta Kanallar ve Aktif Kullanıcı Listesi -->
     <div class="sidebar">
-      <h3>Kullanıcılar</h3>
-      <ul id="users-list"></ul>
+      
+      <!-- Yeni Eklenen Çoklu Oda (Kanal) Menüsü -->
+      <div class="channel-section">
+        <h3>Kanallar</h3>
+        <ul id="channels-list">
+          <li class="channel active" data-room="genel"># genel</li>
+          <li class="channel" data-room="oyun"># oyun</li>
+          <li class="channel" data-room="muzik"># müzik</li>
+        </ul>
+      </div>
+
+      <div class="users-section">
+        <h3>Bu Odadakiler</h3>
+        <ul id="users-list"></ul>
+      </div>
+
     </div>
     
     <!-- Ortada Metin Sohbeti Alanı -->
     <div class="main-content">
+      <div class="room-header">
+        <h2 id="current-room-name"># genel</h2>
+      </div>
       <div class="chat-section">
         <div id="messages"></div>
         <form id="chat-form">
-           <input type="text" id="chat-input" placeholder="Odaya mesaj yaz..." autocomplete="off">
+           <input type="text" id="chat-input" placeholder="Bu odaya mesaj yaz..." autocomplete="off">
            <button type="submit">Gönder</button>
         </form>
       </div>
@@ -42,14 +59,13 @@
     <div class="video-section">
       <h3>Görüntülü Görüşme</h3>
       <div id="video-grid">
-         <!-- Lokal kullanıcı (Sizin) kameranız -->
          <div class="video-wrapper local">
             <video id="local-video" muted autoplay playsinline></video>
             <span class="video-label" id="local-label">Sen</span>
          </div>
       </div>
       <div class="video-controls">
-         <button id="hangup-btn" class="danger">Görüşmeyi Sonlandır</button>
+         <button id="hangup-btn" class="danger">Aramayı Sonlandır</button>
       </div>
     </div>
 

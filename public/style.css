@@ -1,12 +1,12 @@
 :root {
-  --bg-color: #1e2124;    /* Main dark background (Discord-like) */
-  --panel-color: #282b30; /* Lighter panel background */
-  --sidebar-color: #2f3136; /* Sidebar background */
-  --chat-bg: #36393f;     /* Chat area background */
-  --input-bg: #40444b;    /* Input area background */
-  --highlight-color: #5865F2; /* Blurple */
-  --success-color: #3ba55c;   /* Green */
-  --danger-color: #ed4245;    /* Redish action color */
+  --bg-color: #1e2124;    
+  --panel-color: #282b30; 
+  --sidebar-color: #2f3136; 
+  --chat-bg: #36393f;     
+  --input-bg: #40444b;    
+  --highlight-color: #5865F2; 
+  --success-color: #3ba55c;   
+  --danger-color: #ed4245;    
   
   --text-main: #dcddde;
   --text-muted: #8e9297;
@@ -30,7 +30,6 @@ body {
   overflow: hidden;
 }
 
-/* --- Giriş Ekranı (Login) --- */
 #login-screen {
   background-color: var(--panel-color);
   padding: 2.5rem;
@@ -39,12 +38,10 @@ body {
   box-shadow: 0 8px 24px rgba(0,0,0,0.5);
   width: 350px;
 }
-
 #login-screen h2 {
   margin-bottom: 2rem;
   color: #fff;
 }
-
 #login-screen input {
   padding: 1rem;
   border-radius: 4px;
@@ -56,7 +53,6 @@ body {
   margin-bottom: 1.5rem;
   font-size: 1rem;
 }
-
 #login-screen button {
   padding: 1rem;
   background-color: var(--highlight-color);
@@ -69,41 +65,66 @@ body {
   width: 100%;
   transition: background-color 0.2s;
 }
-
 #login-screen button:hover {
   background-color: #4752c4;
 }
 
-/* --- Uygulama İskeleti --- */
 #app-container {
   display: flex;
   width: 100%;
   height: 100%;
 }
 
-/* Sol Navbar / Aktif Kullanıcılar */
 .sidebar {
-  width: 250px;
+  width: 260px;
   background-color: var(--sidebar-color);
   padding: 1rem;
   display: flex;
   flex-direction: column;
 }
 
-.sidebar h3 {
-  margin-bottom: 1rem;
+.channel-section {
+  margin-bottom: 1.5rem;
+}
+.channel-section h3, .users-section h3 {
+  margin-bottom: 0.8rem;
   font-size: 0.8rem;
   text-transform: uppercase;
   color: var(--text-muted);
   letter-spacing: 0.5px;
 }
+#channels-list {
+  list-style: none;
+}
+.channel {
+  padding: 0.6rem;
+  margin-bottom: 0.3rem;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-weight: 600;
+  transition: background 0.2s, color 0.2s;
+}
+.channel:hover {
+  background: rgba(255,255,255,0.03);
+  color: #fff;
+}
+.channel.active {
+  background: rgba(255,255,255,0.08); /* Highlight for current channel */
+  color: #fff;
+}
 
+.users-section {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  overflow: hidden;
+}
 #users-list {
   list-style: none;
   flex-grow: 1;
   overflow-y: auto;
 }
-
 #users-list li {
   padding: 0.7rem;
   margin-bottom: 0.5rem;
@@ -113,29 +134,26 @@ body {
   justify-content: space-between;
   align-items: center;
   transition: background-color 0.2s ease;
+  font-size: 0.9rem;
 }
-
 #users-list li:hover {
   background-color: rgba(255,255,255,0.05);
 }
-
 #users-list button {
   background-color: var(--success-color);
   border: none;
   color: #fff;
-  padding: 0.4rem 0.8rem;
+  padding: 0.3rem 0.6rem;
   border-radius: 3px;
   cursor: pointer;
   font-size: 0.75rem;
   font-weight: bold;
   transition: opacity 0.2s;
 }
-
 #users-list button:hover {
   opacity: 0.85;
 }
 
-/* Ortadaki Chat Alanı */
 .main-content {
   flex-grow: 1;
   display: flex;
@@ -143,41 +161,49 @@ body {
   background-color: var(--chat-bg);
   border-right: 1px solid var(--panel-color);
 }
+.room-header {
+  padding: 1.2rem 1.5rem;
+  border-bottom: 1px solid var(--panel-color);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  z-index: 10;
+}
+#current-room-name {
+  font-size: 1.3rem;
+  color: #fff;
+}
 
 .chat-section {
   flex-grow: 1;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  overflow: hidden;
 }
-
 #messages {
   flex-grow: 1;
-  padding: 1rem;
+  padding: 1.5rem;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 0.8rem;
+  gap: 1rem;
 }
 
 .message {
   padding: 0.8rem;
   border-radius: 6px;
   max-width: 80%;
+  word-wrap: break-word;
 }
-
 .message strong {
   margin-right: 0.5rem;
   color: #fff;
 }
-
 .message.mine {
   align-self: flex-end;
   background-color: #4f545c;
   text-align: right;
   border-radius: 8px 8px 0 8px;
 }
-
 .message.system {
   color: var(--text-muted);
   font-size: 0.85em;
@@ -186,7 +212,6 @@ body {
   background-color: transparent;
   padding: 0.2rem;
 }
-
 .message:not(.mine):not(.system) {
   align-self: flex-start;
   background-color: var(--sidebar-color);
@@ -194,12 +219,11 @@ body {
 }
 
 #chat-form {
-  padding: 1rem 1.5rem;
+  padding: 1.5rem;
   background-color: var(--chat-bg);
   display: flex;
   gap: 1rem;
 }
-
 #chat-input {
   flex-grow: 1;
   padding: 1rem;
@@ -210,9 +234,8 @@ body {
   outline: none;
   font-size: 1rem;
 }
-
 #chat-form button {
-  padding: 0 1.5rem;
+  padding: 0 2rem;
   background-color: var(--highlight-color);
   color: white;
   border: none;
@@ -221,12 +244,10 @@ body {
   font-weight: bold;
   transition: background-color 0.2s;
 }
-
 #chat-form button:hover {
   background-color: #4752c4;
 }
 
-/* Sağ Tarfata WebRTC Videosu Alanı */
 .video-section {
   width: 320px;
   background-color: var(--sidebar-color);
@@ -234,7 +255,6 @@ body {
   display: flex;
   flex-direction: column;
 }
-
 .video-section h3 {
   margin-bottom: 1rem;
   text-align: center;
@@ -243,7 +263,6 @@ body {
   color: var(--text-muted);
   letter-spacing: 0.5px;
 }
-
 #video-grid {
   display: flex;
   flex-direction: column;
@@ -251,17 +270,15 @@ body {
   flex-grow: 1;
   overflow-y: auto;
 }
-
 .video-wrapper {
   position: relative;
   width: 100%;
-  padding-bottom: 56.25%; /* 16:9 Aspect Ratio */
+  padding-bottom: 56.25%;
   background-color: #000;
   border-radius: var(--border-radius);
   overflow: hidden;
   box-shadow: 0 4px 10px rgba(0,0,0,0.3);
 }
-
 .video-wrapper video {
   position: absolute;
   top: 0;
@@ -269,8 +286,11 @@ body {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transform: scaleX(-1); /* Ayna efekti (ilk kamerada) */
 }
-
+.video-wrapper.remote video {
+  transform: none; /* Karşının kamerasını ayna yapma */
+}
 .video-label {
   position: absolute;
   bottom: 8px;
@@ -281,13 +301,11 @@ body {
   font-size: 0.75rem;
   font-weight: bold;
 }
-
 .video-controls {
   margin-top: 1rem;
   display: flex;
   gap: 0.5rem;
 }
-
 .video-controls button {
   flex: 1;
   padding: 1rem;
@@ -298,12 +316,10 @@ body {
   font-size: 0.9rem;
   transition: background-color 0.2s;
 }
-
 .video-controls .danger {
   background-color: var(--danger-color);
   color: white;
 }
-
 .video-controls .danger:hover {
   background-color: #c93639;
 }
