@@ -146,7 +146,6 @@ socket.on('global-users', (usersObj) => {
     });
     for (let ip of ips) {
         const u = allUsersList[ip];
-        if (u.peerId === myPeerId) continue; 
         
         const li = document.createElement('li');
         li.style.opacity = u.isOnline ? '1' : '0.4';
@@ -162,10 +161,18 @@ socket.on('global-users', (usersObj) => {
         
         const nameSpan = document.createElement('span');
         nameSpan.textContent = u.username;
+        
+        // KENDİ İSMİNİ PARLAT!
+        if (u.peerId === myPeerId) {
+             nameSpan.textContent += " (Sen)";
+             nameSpan.style.color = "#43b581"; 
+             nameSpan.style.fontWeight = "bold";
+        }
+        
         infoDiv.appendChild(nameSpan);
         
         const callBtn = document.createElement('button');
-        if(u.isOnline) {
+        if(u.isOnline && u.peerId !== myPeerId) {
              callBtn.innerHTML = "Ara";
              callBtn.onclick = () => initiatePrivateCall(u.peerId, u.username);
         } else {
@@ -173,7 +180,7 @@ socket.on('global-users', (usersObj) => {
         }
         
         li.appendChild(infoDiv); 
-        if(u.isOnline) li.appendChild(callBtn); 
+        if(u.isOnline && u.peerId !== myPeerId) li.appendChild(callBtn); 
         usersList.appendChild(li);
     }
 });
