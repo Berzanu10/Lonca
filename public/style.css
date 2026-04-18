@@ -76,7 +76,7 @@ body {
 }
 
 .sidebar {
-  width: 250px; /* Genişletildi */
+  width: 250px;
   background-color: var(--sidebar-color);
   padding: 1rem;
   display: flex;
@@ -106,7 +106,6 @@ body {
   transition: background 0.2s, color 0.2s;
 }
 
-/* Sadece text kanallarına tıklandığındaki renkler */
 .text-channel {
   padding: 0.6rem;
 }
@@ -119,12 +118,12 @@ body {
   color: #fff;
 }
 
-/* Ses Kanalları Stilleri (Discord Tarzı İç İçe) */
+/* Ses Kanalları ve AKTİF KONUŞMA YEŞİL HALKA Stilleri */
 .voice-channel {
   display: flex;
   flex-direction: column;
   padding: 0;
-  background: transparent !important; /* Altında liste çıkacağı için dış bg transparan */
+  background: transparent !important; 
 }
 .voice-channel-header {
   padding: 0.6rem;
@@ -137,19 +136,58 @@ body {
   color: #fff;
 }
 .voice-channel.active .voice-channel-header {
-  color: #3ba55c; /* Ses odasında aktifken yeşil yanar */
+  color: #3ba55c; 
 }
 .voice-users {
   list-style: none;
-  padding-left: 1.8rem;
+  padding-left: 1.2rem;
   width: 100%;
 }
-.voice-users li {
-  padding: 0.3rem 0;
-  font-size: 0.85rem;
-  color: #b9bbbe;
+.voice-user {
+  padding: 0.2rem 0;
+}
+.voice-user-info {
   display: flex;
   align-items: center;
+  font-size: 0.85rem;
+  color: #b9bbbe;
+  cursor: pointer;
+  padding: 0.2rem;
+  border-radius: 4px;
+}
+.voice-user-info:hover {
+  background: rgba(255,255,255,0.05);
+}
+
+/* Avatara Dönüşen Yeşil Yanan Ses Topu */
+.avatar-circle {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background-color: #36393f;
+  border: 2px solid transparent; /* Varsayılan sönük */
+  margin-right: 8px;
+  flex-shrink: 0;
+  transition: border-color 0.1s ease, box-shadow 0.1s ease;
+}
+.avatar-circle.speaking {
+  border-color: #3ba55c; /* Konuşurken SÜREKLİ YEŞİL DÖNER */
+  box-shadow: 0 0 6px rgba(59, 165, 92, 0.8);
+}
+
+/* Kişiye Tıklandığında Çıkan Ses Azaltma (Volume) Ayarı */
+.voice-volume-control {
+  padding: 0.5rem 0 0.5rem 1.8rem;
+  animation: fadein 0.2s ease;
+}
+.voice-volume-control input[type=range] {
+  width: 90%;
+  accent-color: var(--highlight-color);
+  cursor: pointer;
+}
+@keyframes fadein {
+  from { opacity: 0; transform: translateY(-5px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .danger-btn {
@@ -165,9 +203,9 @@ body {
   background: #c93639;
 }
 
-/* SAĞ TARAF (Özel Arama Listesi) */
+/* SAĞ TARAF (Global IP Veritabanı) */
 .right-sidebar {
-  width: 260px;
+  width: 300px;
   background-color: var(--sidebar-color);
   border-left: 1px solid var(--panel-color);
   padding: 1rem;
@@ -317,7 +355,7 @@ body {
   background-color: #4752c4;
 }
 
-/* VİDEO MODALI (Özel arama için) */
+/* VİDEO MODALI */
 #video-modal {
   position: fixed;
   top: 0; left: 0; width: 100%; height: 100%;
@@ -325,7 +363,6 @@ body {
   display: flex; justify-content: center; align-items: center;
   z-index: 1000;
 }
-
 .video-modal-content {
   background: var(--panel-color);
   padding: 1.5rem;
@@ -337,20 +374,17 @@ body {
   gap: 1.5rem;
   box-shadow: 0 10px 40px rgba(0,0,0,0.9);
 }
-
 .video-modal-content h3 {
   text-align: center;
   color: #fff;
   font-size: 1.3rem;
 }
-
 #video-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 1rem;
   width: 100%;
 }
-
 .video-wrapper {
   position: relative;
   width: 100%;
@@ -360,13 +394,11 @@ body {
   overflow: hidden;
   box-shadow: 0 4px 10px rgba(0,0,0,0.4);
 }
-
 .video-wrapper video {
   position: absolute;
   top: 0; left: 0; width: 100%; height: 100%;
   object-fit: cover;
 }
-
 .video-label {
   position: absolute;
   bottom: 8px; left: 8px;
@@ -376,7 +408,6 @@ body {
   font-size: 0.9rem;
   font-weight: bold;
 }
-
 .video-controls {
   margin-top: 0.5rem;
   display: flex;
