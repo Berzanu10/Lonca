@@ -3,57 +3,85 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Lonca</title>
+  <title>Lonca - Gelişmiş Voice</title>
   <link rel="stylesheet" href="style.css">
   <script src="/socket.io/socket.io.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 </head>
 <body>
 
-  <!-- Giriş Ekranı -->
   <div id="login-screen">
     <h2>Lonca'ya Hoş Geldin</h2>
     <input type="text" id="username-input" placeholder="Takma adınızı girin..." autocomplete="off">
     <button id="join-btn">Sunucuya Katıl</button>
   </div>
 
-  <!-- Ana Uygulama Arayüzü -->
   <div id="app-container" style="display: none;">
     
-    <!-- Sol Tarafta Kanallar -->
+    <!-- SOL BÖLÜM (Kanallar ve Alt Kontrol Paneli) -->
     <div class="sidebar">
       
-      <div class="channel-section">
-        <h3>💬 Metin Kanalları</h3>
-        <ul id="text-channels-list">
-          <li class="channel text-channel active" data-room="genel"># genel</li>
-          <li class="channel text-channel" data-room="oyun"># oyun</li>
-          <li class="channel text-channel" data-room="muzik"># müzik</li>
-        </ul>
+      <!-- Kaydırılabilir Kanallar Alanı -->
+      <div class="sidebar-scrollable">
+          <div class="channel-section">
+            <h3>💬 Metin Kanalları</h3>
+            <ul id="text-channels-list">
+              <li class="channel text-channel active" data-room="genel"># genel</li>
+              <li class="channel text-channel" data-room="oyun"># oyun</li>
+              <li class="channel text-channel" data-room="muzik"># müzik</li>
+            </ul>
+          </div>
+
+          <div class="channel-section" style="margin-top: 1.5rem;">
+            <h3>🔊 Sesli Odalar</h3>
+            <ul id="voice-channels-list">
+              <li class="channel voice-channel" data-room="sohbet">
+                 <div class="voice-channel-header">🔊 Sohbet Odası</div>
+                 <ul class="voice-users" id="voice-users-sohbet"></ul>
+              </li>
+              <li class="channel voice-channel" data-room="oyun">
+                 <div class="voice-channel-header">🔊 Oyun Ekibi</div>
+                 <ul class="voice-users" id="voice-users-oyun"></ul>
+              </li>
+              <li class="channel voice-channel" data-room="sessiz">
+                 <div class="voice-channel-header">🔊 Sessiz Çalışma</div>
+                 <ul class="voice-users" id="voice-users-sessiz"></ul>
+              </li>
+            </ul>
+          </div>
       </div>
 
-      <div class="channel-section" style="margin-top: 1.5rem;">
-        <h3>🔊 Sesli Odalar</h3>
-        <ul id="voice-channels-list">
-          <li class="channel voice-channel" data-room="sohbet">
-             <div class="voice-channel-header">🔊 Sohbet Odası</div>
-             <ul class="voice-users" id="voice-users-sohbet"></ul>
-          </li>
-          <li class="channel voice-channel" data-room="oyun">
-             <div class="voice-channel-header">🔊 Oyun Ekibi</div>
-             <ul class="voice-users" id="voice-users-oyun"></ul>
-          </li>
-          <li class="channel voice-channel" data-room="sessiz">
-             <div class="voice-channel-header">🔊 Sessiz Çalışma</div>
-             <ul class="voice-users" id="voice-users-sessiz"></ul>
-          </li>
-        </ul>
-        <button id="leave-voice-btn" class="danger-btn" style="display:none; margin-top:1rem; width:100%;">Bağlantıyı Kes (Ses)</button>
+      <!-- ALT KONTROL PANELİ (DISCORD GİBİ SIFIRA SIFIR) -->
+      <div class="user-bottom-panel" id="user-bottom-panel">
+          
+          <!-- Aktif Ses Odasındaysa Çıkan Bağlantı Bilgisi -->
+          <div id="voice-connection-info" style="display: none;">
+              <div style="display:flex; align-items:center;">
+                  <span style="color: #43b581; font-size: 1.3rem; margin-right: 8px;">📶</span>
+                  <div class="voice-text">
+                      <div class="status-title">Ses Bağlantısı Kuruldu</div>
+                      <div class="status-room" id="active-voice-room-name">Sohbet Odası</div>
+                  </div>
+              </div>
+              <button id="bottom-leave-voice" class="icon-btn hover-danger" title="Bağlantıyı Kes">X</button>
+          </div>
+
+          <!-- Sabit Kişisel Bar (Kullanıcı + Donanım Butonları) -->
+          <div class="user-controls-bar">
+              <div class="current-user-info">
+                 <div id="my-avatar" class="avatar-circle">?</div>
+                 <span id="display-my-username" style="color:#fff; font-size:0.9rem; font-weight:600; white-space:nowrap;">Sen</span>
+              </div>
+              <div class="control-icons">
+                 <button id="toggle-mic-btn" class="icon-btn" title="Mikrofonu Kapat">🎤</button>
+                 <button id="toggle-deaf-btn" class="icon-btn" title="Kulaklığı Kapat">🎧</button>
+              </div>
+          </div>
       </div>
 
     </div>
     
-    <!-- Ortada Metin Sohbeti Alanı -->
+    <!-- ORTA BÖLÜM (Metin Sohbeti) -->
     <div class="main-content">
       <div class="room-header">
         <h2 id="current-room-name"># genel</h2>
@@ -61,27 +89,26 @@
       <div class="chat-section">
         <div id="messages"></div>
         <form id="chat-form">
-           <input type="text" id="chat-input" placeholder="Bu metin kanalına mesaj yaz..." autocomplete="off">
+           <input type="text" id="chat-input" placeholder="Metin yaz..." autocomplete="off">
            <button type="submit">Gönder</button>
         </form>
       </div>
     </div>
 
-    <!-- Sağ Tarafta Tümü (Online+Offline Global IP Veritabanı) -->
+    <!-- SAĞ BÖLÜM (Global Kişiler Veritabanı) -->
     <div class="right-sidebar">
       <div class="users-section">
-         <h3>Sunucuya Kayıtlı Kullanıcılar</h3>
-         <p style="font-size:0.75rem; color:var(--text-muted); margin-bottom: 10px;">Geçmişten Bugüne - IP Korumalı</p>
+         <h3>Sunucu Kayıtlıları</h3>
+         <p style="font-size:0.75rem; color:var(--text-muted); margin-bottom: 10px;">Çevrimiçi bir kişiyi Özel Ara</p>
          <ul id="users-list"></ul>
       </div>
     </div>
 
   </div>
 
-  <!-- Özel Görüntülü Görüşme Modalı -->
   <div id="video-modal" style="display: none;">
      <div class="video-modal-content">
-        <h3>📹 Özel Aktif Görüntülü Görüşme</h3>
+        <h3>📹 Özel Çift Taraflı Görüntülü Arama</h3>
         <div id="video-grid"></div>
         <div class="video-controls">
            <button id="hangup-btn" class="danger-btn">Aramayı Sonlandır</button>
@@ -89,9 +116,7 @@
      </div>
   </div>
 
-  <!-- Görünmez Audio Oynatıcıları -->
   <div id="audio-container" style="display:none;"></div>
-
   <script src="script.js"></script>
 </body>
 </html>
