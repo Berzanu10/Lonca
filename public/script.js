@@ -19,6 +19,10 @@ let privateCall = null;
 let voiceCalls = {};
 let allUsersList = {};
 
+let activeRoomMessages = [];
+let isSelectionMode = false;
+let selectedMessageIds = new Set();
+
 let audioContext = null;
 const analysers = {};
 
@@ -503,40 +507,223 @@ function joinTextRoom(room) {
     messages.innerHTML = '';
     socket.emit('join-text-room', room);
 }
-socket.on('create-message', (message, senderName, msgId) => appendMessage(senderName, message, msgId));
+socket.on('create-message', (message, senderName, msgId, isSystem) => {
+    appendMessage(senderName, message, msgId, isSystem);
+    activeRoomMessages.push({ id: msgId, sender: senderName, text: message, isSystem: isSystem });
+});
 socket.on('chat-history', (history) => {
     messages.innerHTML = '';
+    activeRoomMessages = history;
     history.forEach(msg => {
-        appendMessage(msg.sender, msg.text, msg.id);
+        appendMessage(msg.sender, msg.text, msg.id, msg.isSystem, msg.pinned);
     });
     messages.scrollTop = messages.scrollHeight;
+    updatePinnedMessagesBanner();
 });
 chatForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const msg = chatInput.value.trim();
     if (msg) { socket.emit('chat-message', msg); chatInput.value = ''; }
 });
-function appendMessage(sender, msg, msgId) {
+function appendMessage(sender, msg, msgId, isSystem, isPinned) {
     const div = document.createElement('div');
     div.classList.add('message');
     div.setAttribute('data-id', msgId);
-    if (sender === myUsername) div.classList.add('mine');
     
-    let deleteBtnHtml = '';
-    if (amIAdmin) {
-        deleteBtnHtml = `<button class="delete-msg-btn" onclick="deleteMessage('${msgId}')" title="Mesajı Sil">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-        </button>`;
+    if (isSystem) {
+        div.classList.add('system');
+    } else if (sender === myUsername) {
+        div.classList.add('mine');
+    }
+    
+    if (isPinned) {
+        div.classList.add('pinned');
     }
 
-    div.innerHTML = `
-        <div style="display:flex; justify-content:space-between; width:100%; align-items:center;">
-            <div><strong>${sender}:</strong> <span>${msg}</span></div>
-            ${deleteBtnHtml}
-        </div>
-    `;
+    // Checkbox container for selection mode
+    const selectContainer = document.createElement('div');
+    selectContainer.className = 'message-select-container';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'message-checkbox';
+    checkbox.checked = selectedMessageIds.has(msgId);
+    selectContainer.appendChild(checkbox);
+    div.appendChild(selectContainer);
+
+    // Message text contents container
+    const contentDiv = document.createElement('div');
+    contentDiv.style.display = 'flex';
+    contentDiv.style.justifyContent = 'space-between';
+    contentDiv.style.width = '100%';
+    contentDiv.style.alignItems = 'center';
+    
+    const textWrapper = document.createElement('div');
+    if (isSystem) {
+        textWrapper.innerHTML = `<span>${msg}</span>`;
+    } else {
+        const strong = document.createElement('strong');
+        strong.textContent = sender + ':';
+        const span = document.createElement('span');
+        span.textContent = msg;
+        textWrapper.appendChild(strong);
+        textWrapper.appendChild(document.createTextNode(' '));
+        textWrapper.appendChild(span);
+    }
+    contentDiv.appendChild(textWrapper);
+    div.appendChild(contentDiv);
+
+    // 3-dots actions button (hidden on system messages)
+    if (!isSystem) {
+        const actionsBtn = document.createElement('div');
+        actionsBtn.className = 'message-actions-btn';
+        actionsBtn.title = 'Aksiyonlar';
+        actionsBtn.innerHTML = '•••';
+        
+        actionsBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            closeAllContextMenus();
+            openContextMenu(div, msgId, sender);
+        });
+        
+        div.appendChild(actionsBtn);
+    }
+
+    // Hover list message click for selection mode
+    div.addEventListener('click', (e) => {
+        if (isSelectionMode) {
+            e.preventDefault();
+            toggleMessageSelection(msgId, div, checkbox);
+        }
+    });
+
+    checkbox.addEventListener('change', (e) => {
+        if (isSelectionMode) {
+            e.stopPropagation();
+            toggleMessageSelection(msgId, div, checkbox, checkbox.checked);
+        }
+    });
+
     messages.appendChild(div);
     messages.scrollTop = messages.scrollHeight;
+}
+
+function openContextMenu(messageDiv, msgId, sender) {
+    const menu = document.createElement('div');
+    menu.className = 'message-context-menu';
+    
+    const msgObj = activeRoomMessages.find(m => m.id === msgId);
+    const isCurrentlyPinned = msgObj ? !!msgObj.pinned : false;
+
+    // Pin option
+    const pinBtn = document.createElement('button');
+    pinBtn.className = 'context-menu-item';
+    pinBtn.innerHTML = isCurrentlyPinned ? '📌 İğneyi Kaldır' : '📌 Mesajı Sabitle';
+    pinBtn.onclick = () => {
+        socket.emit('pin-message', msgId);
+        closeAllContextMenus();
+    };
+    menu.appendChild(pinBtn);
+
+    // Select option
+    const selectBtn = document.createElement('button');
+    selectBtn.className = 'context-menu-item';
+    selectBtn.innerHTML = '☑️ Mesajı Seç';
+    selectBtn.onclick = () => {
+        enterSelectionMode();
+        toggleMessageSelection(msgId, messageDiv, messageDiv.querySelector('.message-checkbox'), true);
+        closeAllContextMenus();
+    };
+    menu.appendChild(selectBtn);
+
+    // Delete option (Admins only)
+    if (amIAdmin) {
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'context-menu-item danger';
+        deleteBtn.innerHTML = '🗑️ Mesajı Sil';
+        deleteBtn.onclick = () => {
+            showCustomConfirm("Mesajı Sil", "Bu mesajı silmek istediğinize emin misiniz?", true, () => {
+                socket.emit('delete-message', msgId);
+            });
+            closeAllContextMenus();
+        };
+        menu.appendChild(deleteBtn);
+    }
+
+    messageDiv.appendChild(menu);
+}
+
+function closeAllContextMenus() {
+    document.querySelectorAll('.message-context-menu').forEach(m => m.remove());
+}
+
+document.addEventListener('click', () => {
+    closeAllContextMenus();
+});
+
+// Selection Mode Functions
+function enterSelectionMode() {
+    isSelectionMode = true;
+    selectedMessageIds.clear();
+    document.getElementById('messages').classList.add('selection-mode');
+    document.getElementById('selection-action-bar').style.display = 'flex';
+    document.getElementById('chat-form').style.display = 'none';
+    
+    const bulkDeleteBtn = document.getElementById('bulk-delete-btn');
+    if (bulkDeleteBtn) {
+        bulkDeleteBtn.style.display = amIAdmin ? 'block' : 'none';
+    }
+    
+    updateSelectionBarUI();
+}
+
+function cancelSelectionMode() {
+    isSelectionMode = false;
+    selectedMessageIds.clear();
+    document.getElementById('messages').classList.remove('selection-mode');
+    document.getElementById('selection-action-bar').style.display = 'none';
+    document.getElementById('chat-form').style.display = 'flex';
+    
+    document.querySelectorAll('.message').forEach(el => {
+        el.classList.remove('selected');
+        const cb = el.querySelector('.message-checkbox');
+        if (cb) cb.checked = false;
+    });
+}
+
+function toggleMessageSelection(msgId, messageDiv, checkbox, forceState) {
+    const isSelected = (forceState !== undefined) ? forceState : !selectedMessageIds.has(msgId);
+    
+    if (isSelected) {
+        selectedMessageIds.add(msgId);
+        messageDiv.classList.add('selected');
+        if (checkbox) checkbox.checked = true;
+    } else {
+        selectedMessageIds.delete(msgId);
+        messageDiv.classList.remove('selected');
+        if (checkbox) checkbox.checked = false;
+    }
+    
+    updateSelectionBarUI();
+}
+
+function updateSelectionBarUI() {
+    document.getElementById('selected-count-text').textContent = `${selectedMessageIds.size} mesaj seçildi`;
+}
+
+// Pinned Message Banner Management
+function updatePinnedMessagesBanner() {
+    const banner = document.getElementById('pinned-messages-banner');
+    const textEl = document.getElementById('pinned-message-text');
+    
+    const pinnedMsgs = activeRoomMessages.filter(m => !!m.pinned);
+    
+    if (pinnedMsgs.length > 0) {
+        const latestPin = pinnedMsgs[pinnedMsgs.length - 1];
+        textEl.textContent = `${latestPin.sender}: "${latestPin.text}"`;
+        banner.style.display = 'flex';
+    } else {
+        banner.style.display = 'none';
+    }
 }
 
 // -----------------------------------------
@@ -792,8 +979,6 @@ socket.on('admin-status', (isAdmin) => {
     amIAdmin = isAdmin;
     if (addTextBtn) addTextBtn.style.display = isAdmin ? 'block' : 'none';
     if (addVoiceBtn) addVoiceBtn.style.display = isAdmin ? 'block' : 'none';
-    const clearChatBtn = document.getElementById('clear-chat-btn');
-    if (clearChatBtn) clearChatBtn.style.display = isAdmin ? 'block' : 'none';
 });
 
 socket.on('channels-list', ({ text, voice }) => {
@@ -914,6 +1099,8 @@ socket.on('message-deleted', (msgId) => {
     if (msgEl) {
         msgEl.remove();
     }
+    activeRoomMessages = activeRoomMessages.filter(m => m.id !== msgId);
+    updatePinnedMessagesBanner();
 });
 
 socket.on('kicked-from-voice', () => {
@@ -931,18 +1118,103 @@ socket.on('kicked-from-server', () => {
     });
 });
 
-// Sohbeti Temizle
-const clearChatBtn = document.getElementById('clear-chat-btn');
-if (clearChatBtn) {
-    clearChatBtn.addEventListener('click', () => {
-        showCustomConfirm("Sohbeti Temizle", `"${currentTextRoom}" kanalındaki tüm mesajları silmek istediğinize emin misiniz?`, true, () => {
-            socket.emit('clear-channel-messages', currentTextRoom);
-        });
-    });
-}
-
-socket.on('channel-messages-cleared', (roomId) => {
-    if (roomId === currentTextRoom) {
-        messages.innerHTML = '';
+socket.on('message-pinned-status', (msgId, isPinned) => {
+    const msg = activeRoomMessages.find(m => m.id === msgId);
+    if (msg) {
+        msg.pinned = isPinned;
     }
+    const msgEl = document.querySelector(`.message[data-id="${msgId}"]`);
+    if (msgEl) {
+        msgEl.classList.toggle('pinned', isPinned);
+    }
+    updatePinnedMessagesBanner();
+});
+
+socket.on('messages-bulk-deleted', (msgIds) => {
+    msgIds.forEach(id => {
+        const msgEl = document.querySelector(`.message[data-id="${id}"]`);
+        if (msgEl) msgEl.remove();
+    });
+    activeRoomMessages = activeRoomMessages.filter(m => !msgIds.includes(m.id));
+    updatePinnedMessagesBanner();
+    if (isSelectionMode) {
+        cancelSelectionMode();
+    }
+});
+
+// Selection Action Bar Event Listeners
+document.getElementById('select-all-btn').addEventListener('click', () => {
+    activeRoomMessages.forEach(msg => {
+        if (msg.isSystem) return;
+        selectedMessageIds.add(msg.id);
+        const msgEl = document.querySelector(`.message[data-id="${msg.id}"]`);
+        if (msgEl) {
+            msgEl.classList.add('selected');
+            const cb = msgEl.querySelector('.message-checkbox');
+            if (cb) cb.checked = true;
+        }
+    });
+    updateSelectionBarUI();
+});
+
+document.getElementById('bulk-delete-btn').addEventListener('click', () => {
+    if (selectedMessageIds.size === 0) return;
+    showCustomConfirm("Seçilenleri Sil", `Seçilen ${selectedMessageIds.size} mesajı silmek istediğinize emin misiniz?`, true, () => {
+        const idsArray = Array.from(selectedMessageIds);
+        socket.emit('bulk-delete-messages', idsArray);
+    });
+});
+
+document.getElementById('cancel-selection-btn').addEventListener('click', () => {
+    cancelSelectionMode();
+});
+
+// Pinned List Modal Event Listeners
+document.getElementById('view-pins-btn').addEventListener('click', () => {
+    const listEl = document.getElementById('pinned-messages-list');
+    listEl.innerHTML = '';
+    
+    const pinnedMsgs = activeRoomMessages.filter(m => !!m.pinned);
+    
+    if (pinnedMsgs.length === 0) {
+        listEl.innerHTML = '<div style="color: #949ba4; text-align: center; padding: 20px;">Sabitlenmiş mesaj bulunmuyor.</div>';
+    } else {
+        pinnedMsgs.forEach(msg => {
+            const div = document.createElement('div');
+            div.style.backgroundColor = '#2b2d31';
+            div.style.padding = '10px 14px';
+            div.style.borderRadius = '4px';
+            div.style.display = 'flex';
+            div.style.justifyContent = 'space-between';
+            div.style.alignItems = 'center';
+            div.style.border = '1px solid rgba(255, 255, 255, 0.05)';
+            
+            const infoDiv = document.createElement('div');
+            infoDiv.innerHTML = `<strong style="color:#fff;">${msg.sender}:</strong> <span style="color:#dbdee1;">${msg.text}</span>`;
+            div.appendChild(infoDiv);
+            
+            const unpinBtn = document.createElement('button');
+            unpinBtn.style.background = 'transparent';
+            unpinBtn.style.border = 'none';
+            unpinBtn.style.color = '#ed4245';
+            unpinBtn.style.cursor = 'pointer';
+            unpinBtn.style.fontWeight = 'bold';
+            unpinBtn.textContent = 'İğneyi Kaldır';
+            unpinBtn.onclick = () => {
+                socket.emit('pin-message', msg.id);
+                div.remove();
+                if (listEl.children.length === 0) {
+                    listEl.innerHTML = '<div style="color: #949ba4; text-align: center; padding: 20px;">Sabitlenmiş mesaj bulunmuyor.</div>';
+                }
+            };
+            div.appendChild(unpinBtn);
+            listEl.appendChild(div);
+        });
+    }
+    
+    document.getElementById('pinned-messages-modal').style.display = 'flex';
+});
+
+document.getElementById('close-pins-modal-btn').addEventListener('click', () => {
+    document.getElementById('pinned-messages-modal').style.display = 'none';
 });

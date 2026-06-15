@@ -148,7 +148,7 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
 .room-header { padding: 1.2rem 1.5rem; border-bottom: 1px solid var(--panel-color); box-shadow: 0 1px 2px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center; }
 .chat-section { flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; }
 #messages { flex-grow: 1; padding: 1.5rem 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
-.message { padding: 4px 24px; display: flex; flex-direction: row; font-size: 1rem; line-height: 1.4; }
+.message { padding: 4px 24px; display: flex; flex-direction: row; font-size: 1rem; line-height: 1.4; position: relative; }
 .message:hover { background-color: rgba(255, 255, 255, 0.03); }
 .message strong { color: #fff; margin-right: 8px; font-weight: 500; flex-shrink: 0; }
 .message.mine strong { color: #43b581; }
@@ -540,23 +540,211 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
   font-weight: 500;
 }
 
-/* Sohbeti Temizle Butonu */
-.clear-chat-btn {
-  background-color: var(--danger-color);
-  color: white;
+/* Sohbeti Temizle Butonu Kaldırıldı, Yerine Mesaj Aksiyonları Eklendi */
+.message-actions-btn {
+  position: absolute;
+  top: 2px;
+  right: 24px;
+  background-color: #313338;
+  border: 1px solid #232428;
+  color: #b5bac1;
+  border-radius: 4px;
+  width: 32px;
+  height: 32px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 1.2rem;
+  line-height: 1;
+  z-index: 5;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  transition: background-color 0.15s, color 0.15s;
+}
+.message:hover .message-actions-btn {
+  display: flex;
+}
+.message-actions-btn:hover {
+  background-color: #35373c;
+  color: #fff;
+}
+
+.message-context-menu {
+  position: absolute;
+  top: 36px;
+  right: 24px;
+  background: #111214;
+  border-radius: 4px;
+  padding: 6px;
+  width: 160px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid rgba(255,255,255,0.05);
+}
+.context-menu-item {
+  background: transparent;
   border: none;
-  padding: 6px 16px;
-  border-radius: 20px;
+  color: #dbdee1;
+  padding: 8px 10px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+.context-menu-item:hover {
+  background-color: #5865F2;
+  color: #fff;
+}
+.context-menu-item.danger:hover {
+  background-color: #ed4245;
+  color: #fff;
+}
+
+/* Çoklu Seçim Modu Stilleri */
+.message-select-container {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  margin-right: 12px;
+  flex-shrink: 0;
+}
+.selection-mode .message-select-container {
+  display: flex;
+}
+.message-checkbox {
+  width: 18px;
+  height: 18px;
+  accent-color: #5865F2;
+  cursor: pointer;
+}
+.selection-mode .message {
+  cursor: pointer;
+}
+.selection-mode .message:hover {
+  background-color: rgba(88, 101, 242, 0.08);
+}
+.selection-mode .message.selected {
+  background-color: rgba(88, 101, 242, 0.15);
+}
+.selection-mode .message-actions-btn {
+  display: none !important;
+}
+
+.selection-bar {
+  background-color: #2b2d31;
+  border-top: 1px solid #1f2023;
+  padding: 12px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 -4px 10px rgba(0,0,0,0.3);
+  animation: slideUp 0.2s ease-out;
+}
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+.selection-bar-info {
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.selection-bar-actions {
+  display: flex;
+  gap: 10px;
+}
+.selection-btn {
+  background-color: #4e5058;
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
   cursor: pointer;
   font-weight: 600;
   font-size: 0.85rem;
-  transition: background-color 0.15s ease, transform 0.15s ease;
+  transition: background-color 0.12s;
 }
-.clear-chat-btn:hover {
+.selection-btn:hover {
+  background-color: #6d6f78;
+}
+.selection-btn.danger {
+  background-color: #ed4245;
+}
+.selection-btn.danger:hover {
   background-color: #c93b3e;
 }
-.clear-chat-btn:active {
-  transform: scale(0.95);
+.selection-btn.cancel {
+  background-color: transparent;
+  border: 1px solid #4e5058;
+}
+.selection-btn.cancel:hover {
+  background-color: rgba(255,255,255,0.05);
+}
+
+/* Sabitlenen Mesajlar Barı */
+.pinned-banner {
+  background-color: rgba(30, 31, 34, 0.6);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 8px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  z-index: 10;
+  backdrop-filter: blur(4px);
+}
+.pinned-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #dbdee1;
+  font-size: 0.85rem;
+}
+.pinned-icon {
+  font-size: 1rem;
+}
+.pinned-text {
+  color: #f2f3f5;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pinned-view-btn {
+  background-color: #4e5058;
+  color: #fff;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.12s;
+}
+.pinned-view-btn:hover {
+  background-color: #6d6f78;
+}
+
+/* Sistem Mesajları */
+.message.system {
+  color: #949ba4;
+  font-style: italic;
+}
+.message.system strong {
+  color: #949ba4 !important;
+}
+.message.system span {
+  color: #949ba4 !important;
 }
 
 /* Custom Dialog Modals (Discord Theme) */

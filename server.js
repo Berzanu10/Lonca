@@ -277,13 +277,38 @@ io.on('connection', (socket) => {
       }
    });
 
-   socket.on('clear-channel-messages', (roomId) => {
-      if (!socket.isAdmin) return;
-      if (messageHistory[roomId]) {
-         messageHistory[roomId] = [];
+   socket.on('pin-message', (msgId) => {
+      let roomId = socket.textRoom;
+      if (!roomId) return;
+      const msg = messageHistory[roomId].find(m => m.id === msgId);
+      if (msg) {
+         msg.pinned = !msg.pinned;
          saveMessages();
-         io.to('text-' + roomId).emit('channel-messages-cleared', roomId);
+         io.to('text-' + roomId).emit('message-pinned-status', msgId, msg.pinned, msg);
+         
+         // System message notification
+         if (msg.pinned) {
+            const sysMsg = {
+               id: 'sys_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+               sender: 'Sistem',
+               text: `${socket.username || 'Bir kullanıcı'} bir mesajı bu kanala sabitledi.`,
+               timestamp: Date.now(),
+               isSystem: true
+            };
+            messageHistory[roomId].push(sysMsg);
+            saveMessages();
+            io.to('text-' + roomId).emit('create-message', sysMsg.text, sysMsg.sender, sysMsg.id, sysMsg.isSystem);
+         }
       }
+   });
+
+   socket.on('bulk-delete-messages', (msgIds) => {
+      if (!socket.isAdmin) return;
+      let roomId = socket.textRoom;
+      if (!roomId || !Array.isArray(msgIds)) return;
+      messageHistory[roomId] = messageHistory[roomId].filter(m => !msgIds.includes(m.id));
+      saveMessages();
+      io.to('text-' + roomId).emit('messages-bulk-deleted', msgIds);
    });
 
    socket.on('disconnect', () => {
