@@ -6,6 +6,29 @@ const { Server } = require("socket.io");
 const fs = require('fs');
 const path = require('path');
 
+// Env variables parser (Zero-dependencies env loader)
+if (fs.existsSync('.env')) {
+   try {
+      const envContent = fs.readFileSync('.env', 'utf8');
+      envContent.split(/\r?\n/).forEach(line => {
+         const trimmed = line.trim();
+         if (trimmed && !trimmed.startsWith('#')) {
+            const index = trimmed.indexOf('=');
+            if (index > 0) {
+               const key = trimmed.substring(0, index).trim();
+               const value = trimmed.substring(index + 1).trim();
+               // Remove surrounding quotes if any
+               const cleanValue = value.replace(/^['"]|['"]$/g, '');
+               process.env[key] = cleanValue;
+            }
+         }
+      });
+      console.log('[ENV] .env dosyası başarıyla yüklendi.');
+   } catch (err) {
+      console.error('[ENV] .env dosyası okunurken hata oluştu:', err);
+   }
+}
+
 // CORS (Güvenlik) İzinleri eklendi
 const io = new Server(server, {
    cors: {
@@ -195,7 +218,11 @@ app.post('/api/auth/login', (req, res) => {
    const normalizedEmail = email.toLowerCase().trim();
    const user = Object.values(usersDb).find(u => u.email === normalizedEmail);
 
-   if (!user || !user.password || !verifyPassword(password, user.password)) {
+   if (!user) {
+      return res.status(400).json({ error: 'Böyle bir kayıt bulunamadı.' });
+   }
+
+   if (!user.password || !verifyPassword(password, user.password)) {
       return res.status(400).json({ error: 'E-posta veya şifre hatalı.' });
    }
 
@@ -525,6 +552,25 @@ function saveMessages() {
 }
 
 const allTimeUsers = {};
+
+// Sunucu başlarken tüm kayıtlı kullanıcıları offline olarak yükle
+// Böylece hiç bağlanmamış kullanıcılar da sağ panelde görünür
+function initAllTimeUsersFromDb() {
+   for (const uId in usersDb) {
+      const u = usersDb[uId];
+      if (!allTimeUsers[uId]) {
+         allTimeUsers[uId] = {
+            username: u.username,
+            isOnline: false,
+            peerId: null,
+            userId: uId,
+            avatar: u.avatar || '',
+            isAdmin: u.isAdmin || false
+         };
+      }
+   }
+}
+initAllTimeUsersFromDb();
 const ADMIN_KEY = process.env.ADMIN_KEY || "berzan123";
 
 io.on('connection', (socket) => {
@@ -563,6 +609,8 @@ io.on('connection', (socket) => {
       socket.emit('voice-rooms-state', voiceRooms);
       socket.emit('admin-status', isAdmin);
       socket.emit('channels-list', { text: Object.keys(textRooms), voice: Object.keys(voiceRooms) });
+      // Yeni kullanıcının güncel listesini al
+      socket.emit('global-users', allTimeUsers);
    });
 
    // METİN
@@ -712,6 +760,32 @@ io.on('connection', (socket) => {
          targetSocket.emit('kicked-from-server');
          targetSocket.disconnect(true);
       }
+   });
+
+   // Sunucudan kalıcı olarak kullanıcı silme (Admin only)
+   socket.on('remove-user', (targetUserId) => {
+      if (!socket.isAdmin) return;
+      if (targetUserId === socket.userId) return; // Kendini silemez
+
+      // Bağlıysa bağlantısını kes
+      const targetSocket = [...io.sockets.sockets.values()].find(s => s.userId === targetUserId);
+      if (targetSocket) {
+         targetSocket.emit('kicked-from-server');
+         targetSocket.disconnect(true);
+      }
+
+      // usersDb'den kalıcı sil
+      if (usersDb[targetUserId]) {
+         delete usersDb[targetUserId];
+         saveUsers();
+      }
+
+      // allTimeUsers'dan sil
+      if (allTimeUsers[targetUserId]) {
+         delete allTimeUsers[targetUserId];
+      }
+
+      io.emit('global-users', allTimeUsers);
    });
 
    socket.on('pin-message', (msgId) => {
