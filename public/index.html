@@ -46,6 +46,8 @@
               <input type="password" id="login-password" required placeholder="••••••••" autocomplete="current-password">
             </div>
             
+            <a href="#" id="forgot-password-link" style="color: var(--highlight-color); font-size: 0.8rem; text-decoration: none; margin-bottom: 1rem; display: inline-block;">Şifremi Unuttum</a>
+            
             <button type="submit" class="auth-submit-btn">Giriş Yap</button>
           </form>
           
@@ -77,6 +79,34 @@
           </form>
           
           <p class="toggle-text">Zaten bir hesabın var mı? <a href="#" id="show-login">Giriş Yap</a></p>
+        </div>
+
+        <!-- ŞİFREMİ UNUTTUM VIEW -->
+        <div id="forgot-view" style="display: none;">
+          <h2>Şifre Sıfırlama</h2>
+          <p class="subtitle">E-posta adresinizi girerek şifrenizi sıfırlayın.</p>
+          
+          <form id="forgot-send-form">
+            <div class="input-group">
+              <label>E-POSTA</label>
+              <input type="email" id="forgot-email" required placeholder="isim@domain.com">
+            </div>
+            <button type="submit" class="auth-submit-btn">Sıfırlama Kodu Gönder</button>
+          </form>
+
+          <form id="forgot-reset-form" style="display: none;">
+            <div class="input-group">
+              <label>DOĞRULAMA KODU</label>
+              <input type="text" id="reset-code" required placeholder="123456">
+            </div>
+            <div class="input-group">
+              <label>YENİ ŞİFRE</label>
+              <input type="password" id="reset-new-password" required placeholder="••••••••">
+            </div>
+            <button type="submit" class="auth-submit-btn">Şifreyi Güncelle</button>
+          </form>
+          
+          <p class="toggle-text"><a href="#" id="back-to-login">Giriş Yap'a Geri Dön</a></p>
         </div>
         
         <!-- GOOGLE GİRİŞİ -->

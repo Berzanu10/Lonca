@@ -102,7 +102,7 @@ function decodeJwt(token) {
 // CONFIG ENDPOINT
 app.get('/api/config', (req, res) => {
    res.json({
-      googleClientId: process.env.GOOGLE_CLIENT_ID || ""
+      googleClientId: process.env.GOOGLE_CLIENT_ID || "333857503713-kcr56p6v2488a0q2093e0b82fspv7s5m.apps.googleusercontent.com" // Varsayılan localhost Client ID'si (Gerekirse değiştirilebilir)
    });
 });
 
@@ -238,8 +238,10 @@ app.post('/api/auth/google', (req, res) => {
 
    // Find or create user
    let user = Object.values(usersDb).find(u => u.email === googleEmail || u.googleId === googleSub);
+   let isNewUser = false;
 
    if (!user) {
+      isNewUser = true;
       const userId = 'user_g_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
       usersDb[userId] = {
          id: userId,
@@ -269,6 +271,7 @@ app.post('/api/auth/google', (req, res) => {
    res.json({
       success: true,
       token,
+      isNewUser,
       user: {
          id: user.id,
          username: user.username,
@@ -276,6 +279,71 @@ app.post('/api/auth/google', (req, res) => {
          avatar: user.avatar || '',
          isAdmin: user.isAdmin
       }
+   });
+});
+
+const passwordResetCodes = new Map(); // email -> code
+
+// FORGOT PASSWORD ENDPOINT
+app.post('/api/auth/forgot-password', (req, res) => {
+   const { email } = req.body;
+   if (!email) {
+      return res.status(400).json({ error: 'Lütfen e-posta adresinizi girin.' });
+   }
+
+   const normalizedEmail = email.toLowerCase().trim();
+   const user = Object.values(usersDb).find(u => u.email === normalizedEmail);
+
+   if (!user) {
+      return res.status(400).json({ error: 'Bu e-posta adresiyle kayıtlı bir kullanıcı bulunamadı.' });
+   }
+
+   if (user.googleId && !user.password) {
+      return res.status(400).json({ error: 'Bu hesap Google ile oluşturulmuş. Lütfen Google ile Giriş yapın.' });
+   }
+
+   const code = Math.floor(100000 + Math.random() * 900000).toString();
+   passwordResetCodes.set(normalizedEmail, code);
+
+   console.log(`[ŞİFRE SIFIRLAMA] Kullanıcı: ${normalizedEmail}, Kod: ${code}`);
+
+   res.json({
+      success: true,
+      message: `Şifre sıfırlama kodu gönderildi.`,
+      code: code
+   });
+});
+
+// RESET PASSWORD ENDPOINT
+app.post('/api/auth/reset-password', (req, res) => {
+   const { email, code, newPassword } = req.body;
+   if (!email || !code || !newPassword) {
+      return res.status(400).json({ error: 'Lütfen tüm alanları doldurun.' });
+   }
+
+   const normalizedEmail = email.toLowerCase().trim();
+   const user = Object.values(usersDb).find(u => u.email === normalizedEmail);
+
+   if (!user) {
+      return res.status(400).json({ error: 'Kullanıcı bulunamadı.' });
+   }
+
+   const storedCode = passwordResetCodes.get(normalizedEmail);
+   if (!storedCode || storedCode !== code.trim()) {
+      return res.status(400).json({ error: 'Geçersiz veya süresi dolmuş sıfırlama kodu.' });
+   }
+
+   if (newPassword.length < 6) {
+      return res.status(400).json({ error: 'Yeni şifre en az 6 karakter olmalıdır.' });
+   }
+
+   user.password = hashPassword(newPassword);
+   passwordResetCodes.delete(normalizedEmail);
+   saveUsers();
+
+   res.json({
+      success: true,
+      message: 'Şifreniz başarıyla sıfırlandı. Yeni şifrenizle giriş yapabilirsiniz.'
    });
 });
 

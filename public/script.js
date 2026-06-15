@@ -41,7 +41,7 @@ const signupView = document.getElementById('signup-view');
 const showSignupLink = document.getElementById('show-signup');
 const showLoginLink = document.getElementById('show-login');
 
-// Form elemanları
+// Form elemanları ve Şifremi Unuttum
 const loginFormEl = document.getElementById('login-form-el');
 const signupFormEl = document.getElementById('signup-form-el');
 const loginEmailInput = document.getElementById('login-email');
@@ -50,6 +50,15 @@ const signupUsernameInput = document.getElementById('signup-username');
 const signupEmailInput = document.getElementById('signup-email');
 const signupPasswordInput = document.getElementById('signup-password');
 const customGoogleBtn = document.getElementById('custom-google-btn');
+
+const forgotView = document.getElementById('forgot-view');
+const forgotSendForm = document.getElementById('forgot-send-form');
+const forgotResetForm = document.getElementById('forgot-reset-form');
+const forgotEmailInput = document.getElementById('forgot-email');
+const resetCodeInput = document.getElementById('reset-code');
+const resetNewPasswordInput = document.getElementById('reset-new-password');
+const forgotPasswordLink = document.getElementById('forgot-password-link');
+const backToLoginLink = document.getElementById('back-to-login');
 
 const usersList = document.getElementById('users-list');
 const messages = document.getElementById('messages');
@@ -184,7 +193,7 @@ const profileSaveBtn = document.getElementById('profile-save-btn');
 const profileCancelBtn = document.getElementById('profile-cancel-btn');
 
 const micSVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>`;
-const headSVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c-4.97 0-9 4.03-9 9v7c0 1.1.9 2 2 2h4v-8H5v-1c0-3.87 3.13-7 7-7s7 3.13 7 7v1h-4v8h4c1.1 0 2-.9 2-2v-7c0-4.97-4.03-9-9-9z"/></svg>`;
+const headSVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c-4.97 0-9 4.03-9 9v7c0 1.1.9 2 2 2h4v-8H5v-1c0-3.87 3.13-7 7-7s7 3.13 7 7v1h-4v8h4c1.1 0 2-.9 2-2v-7c0-4.97-4.03-9-9-9z"/></svg>`;let isProfileModalForced = false;
 
 // ONAYLANAN GİRİŞ İŞLEMİNİ YÖNETEN YARDIMCI FONKSİYON
 function handleLoginSuccess(data) {
@@ -215,7 +224,13 @@ function handleLoginSuccess(data) {
 
     if (loginScreenWrapper) loginScreenWrapper.style.display = 'none';
     if (appContainer) appContainer.style.display = 'flex';
-    initializePeer();
+    
+    if (data.isNewUser) {
+        // İlk kez giriyorsa kullanıcı adı ve fotoğraf için modalı aç, sese/peere hemen bağlanma
+        openProfileModal(true);
+    } else {
+        initializePeer();
+    }
 }
 
 function clearSession() {
@@ -259,6 +274,7 @@ if (showSignupLink) {
         e.preventDefault();
         loginView.style.display = 'none';
         signupView.style.display = 'block';
+        forgotView.style.display = 'none';
     });
 }
 
@@ -266,6 +282,26 @@ if (showLoginLink) {
     showLoginLink.addEventListener('click', (e) => {
         e.preventDefault();
         signupView.style.display = 'none';
+        loginView.style.display = 'block';
+        forgotView.style.display = 'none';
+    });
+}
+
+if (forgotPasswordLink) {
+    forgotPasswordLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        loginView.style.display = 'none';
+        signupView.style.display = 'none';
+        forgotView.style.display = 'block';
+        forgotSendForm.style.display = 'block';
+        forgotResetForm.style.display = 'none';
+    });
+}
+
+if (backToLoginLink) {
+    backToLoginLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        forgotView.style.display = 'none';
         loginView.style.display = 'block';
     });
 }
@@ -288,6 +324,74 @@ if (loginFormEl) {
                 handleLoginSuccess(data);
             } else {
                 showCustomAlert("Hata", data.error || "Giriş yapılamadı.");
+            }
+        })
+        .catch(() => {
+            showCustomAlert("Hata", "Sunucu ile bağlantı kurulamadı.");
+        });
+    });
+}
+
+// Şifremi Unuttum - Kod İsteme Formu Dinleyicisi
+if (forgotSendForm) {
+    forgotSendForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const email = forgotEmailInput.value.trim();
+        
+        fetch('/api/auth/forgot-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                showCustomAlert("Kod Gönderildi", `Şifre sıfırlama kodu gönderildi! Test Kodu: ${data.code}`, () => {
+                    forgotSendForm.style.display = 'none';
+                    forgotResetForm.style.display = 'block';
+                    resetCodeInput.focus();
+                });
+            } else {
+                showCustomAlert("Hata", data.error || "Sıfırlama kodu gönderilemedi.");
+            }
+        })
+        .catch(() => {
+            showCustomAlert("Hata", "Sunucu ile bağlantı kurulamadı.");
+        });
+    });
+}
+
+// Şifremi Unuttum - Şifre Sıfırlama Formu Dinleyicisi
+if (forgotResetForm) {
+    forgotResetForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const email = forgotEmailInput.value.trim();
+        const code = resetCodeInput.value.trim();
+        const newPassword = resetNewPasswordInput.value;
+        
+        if (newPassword.length < 6) {
+            showCustomAlert("Hata", "Şifre en az 6 karakter olmalıdır.");
+            return;
+        }
+        
+        fetch('/api/auth/reset-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, code, newPassword })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                showCustomAlert("Başarılı", data.message, () => {
+                    forgotView.style.display = 'none';
+                    loginView.style.display = 'block';
+                    // Alanları temizle
+                    forgotEmailInput.value = '';
+                    resetCodeInput.value = '';
+                    resetNewPasswordInput.value = '';
+                });
+            } else {
+                showCustomAlert("Hata", data.error || "Şifre sıfırlanamadı.");
             }
         })
         .catch(() => {
@@ -397,6 +501,7 @@ function initGoogleAuth() {
                         document.getElementById("google-signin-container"),
                         { theme: "outline", size: "large", width: "100%" }
                     );
+                    google.accounts.id.prompt(); // Tarayıcıda açık hesapları One Tap ile direkt göster
                 } else {
                     setTimeout(initGoogleAuth, 1000);
                 }
@@ -423,8 +528,16 @@ function initGoogleAuth() {
 
 initGoogleAuth();
 
-function openProfileModal() {
-    profileUsernameInput.value = myUsername;
+function openProfileModal(isForceEdit = false) {
+    isProfileModalForced = isForceEdit;
+    
+    // Kapatma tuşunu ilk girişte gizle
+    const closeBtn = document.getElementById('profile-close-btn');
+    if (closeBtn) {
+        closeBtn.style.display = isForceEdit ? 'none' : 'block';
+    }
+
+    profileUsernameInput.value = myUsername || '';
     const adminKeyInput = document.getElementById('profile-admin-key');
     if (adminKeyInput) adminKeyInput.value = myAdminToken;
 
@@ -459,6 +572,28 @@ function openProfileModal() {
     } else {
         modalAvatarPreview.style.backgroundImage = '';
     }
+
+    // İlk giriş uyarısı
+    let forcedNotice = document.getElementById('profile-modal-forced-notice');
+    if (isForceEdit) {
+        if (!forcedNotice) {
+            forcedNotice = document.createElement('div');
+            forcedNotice.id = 'profile-modal-forced-notice';
+            forcedNotice.style.color = '#FEE75C';
+            forcedNotice.style.fontSize = '0.8rem';
+            forcedNotice.style.fontWeight = 'bold';
+            forcedNotice.style.textAlign = 'center';
+            forcedNotice.style.marginBottom = '12px';
+            forcedNotice.style.backgroundColor = 'rgba(254, 231, 92, 0.1)';
+            forcedNotice.style.padding = '8px';
+            forcedNotice.style.borderRadius = '4px';
+            forcedNotice.textContent = 'Lonca\'ya İlk Giriş! Lütfen bir kullanıcı adı belirleyin (Zorunlu).';
+            profileModal.querySelector('.profile-body').prepend(forcedNotice);
+        }
+    } else {
+        if (forcedNotice) forcedNotice.remove();
+    }
+
     profileModal.style.display = 'flex';
 }
 
@@ -518,10 +653,21 @@ if (modalAvatarPreview && avatarFileInput) {
 const profileCloseBtn = document.getElementById('profile-close-btn');
 if (profileCloseBtn) {
     profileCloseBtn.addEventListener('click', () => {
+        if (isProfileModalForced) return;
         profileModal.style.display = 'none';
         if (modalAvatarPreview) delete modalAvatarPreview.dataset.tempAvatar;
     });
 }
+
+// Esc tuşu ile kapatmayı engelleme
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && profileModal.style.display === 'flex') {
+        if (isProfileModalForced) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+    }
+});
 
 if (profileSaveBtn) {
     profileSaveBtn.addEventListener('click', () => {
