@@ -764,8 +764,9 @@ async function connectVoiceRoom(room) {
 
     disconnectVoiceRoom();
     currentVoiceRoom = room;
-    voiceChannels.forEach(c => c.classList.remove('active'));
-    document.querySelector(`.voice-channel[data-room="${room}"]`).classList.add('active');
+    document.querySelectorAll('.voice-channel').forEach(c => c.classList.remove('active'));
+    const targetEl = document.querySelector(`.voice-channel[data-room="${room}"]`);
+    if (targetEl) targetEl.classList.add('active');
 
     voiceConnectionInfo.style.display = 'flex';
     activeVoiceRoomName.textContent = `"${room}" / Lonca Sunucusu`;
@@ -892,7 +893,7 @@ function disconnectVoiceRoom() {
     }
 
     socket.emit('join-voice-room', null);
-    voiceChannels.forEach(c => c.classList.remove('active'));
+    document.querySelectorAll('.voice-channel').forEach(c => c.classList.remove('active'));
     voiceConnectionInfo.style.display = 'none';
     currentVoiceRoom = null;
     audioContainer.innerHTML = '';
