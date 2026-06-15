@@ -7,6 +7,8 @@ if (!myUserId) {
     localStorage.setItem('userId', myUserId);
 }
 let myAvatar = localStorage.getItem('avatar') || '';
+let myAdminToken = localStorage.getItem('adminToken') || '';
+let amIAdmin = false;
 
 let currentTextRoom = 'genel';
 let currentVoiceRoom = null;
@@ -90,6 +92,9 @@ joinBtn.addEventListener('click', () => {
 
 function openProfileModal() {
     profileUsernameInput.value = myUsername;
+    const adminKeyInput = document.getElementById('profile-admin-key');
+    if (adminKeyInput) adminKeyInput.value = myAdminToken;
+
     if (myAvatar) {
         modalAvatarPreview.style.backgroundImage = `url(${myAvatar})`;
         modalAvatarPreview.style.backgroundSize = 'cover';
@@ -170,6 +175,15 @@ if (profileSaveBtn) {
         if (modalAvatarPreview && modalAvatarPreview.dataset.tempAvatar) {
             localStorage.setItem('avatar', modalAvatarPreview.dataset.tempAvatar);
         }
+        
+        // Save Admin Token
+        const adminKeyVal = document.getElementById('profile-admin-key').value.trim();
+        if (adminKeyVal) {
+            localStorage.setItem('adminToken', adminKeyVal);
+        } else {
+            localStorage.removeItem('adminToken');
+        }
+
         profileModal.style.display = 'none';
         location.reload();
     });
@@ -180,7 +194,7 @@ function initializePeer() {
 
     peer.on('open', id => {
         myPeerId = id;
-        socket.emit('register', myPeerId, myUsername, myUserId, myAvatar);
+        socket.emit('register', myPeerId, myUsername, myUserId, myAvatar, myAdminToken);
         joinTextRoom(currentTextRoom);
     });
 
@@ -311,37 +325,40 @@ socket.on('global-users', (usersObj) => {
             callBtn.style.display = 'none';
         }
 
+        let kickBtn = null;
+        if (amIAdmin && u.peerId !== myPeerId && u.isOnline) {
+            kickBtn = document.createElement('button');
+            kickBtn.innerHTML = "At";
+            kickBtn.style.backgroundColor = "var(--danger-color)";
+            kickBtn.style.marginLeft = "4px";
+            kickBtn.onclick = (e) => {
+                e.stopPropagation();
+                if (confirm(`${u.username} sunucudan atılsın mı?`)) {
+                    socket.emit('kick-from-server', u.userId);
+                }
+            };
+        }
+
         li.appendChild(infoDiv);
         if (u.isOnline && u.peerId !== myPeerId) li.appendChild(callBtn);
+        if (kickBtn) li.appendChild(kickBtn);
         usersList.appendChild(li);
     }
 });
 
 // -----------------------------------------
-// Metin Kanalları
+// Metin Kanalları ve Sohbet Geçmişi
 // -----------------------------------------
-textChannels.forEach(channel => {
-    channel.addEventListener('click', () => {
-        const newRoom = channel.getAttribute('data-room');
-        if (newRoom !== currentTextRoom) {
-            textChannels.forEach(c => c.classList.remove('active'));
-            channel.classList.add('active');
-            currentTextRoom = newRoom;
-            document.getElementById('current-room-name').textContent = `# ${newRoom}`;
-            joinTextRoom(currentTextRoom);
-        }
-    });
-});
 function joinTextRoom(room) {
     if (!myPeerId) return;
     messages.innerHTML = '';
     socket.emit('join-text-room', room);
 }
-socket.on('create-message', (message, senderName) => appendMessage(senderName, message));
+socket.on('create-message', (message, senderName, msgId) => appendMessage(senderName, message, msgId));
 socket.on('chat-history', (history) => {
     messages.innerHTML = '';
     history.forEach(msg => {
-        appendMessage(msg.sender, msg.text);
+        appendMessage(msg.sender, msg.text, msg.id);
     });
     messages.scrollTop = messages.scrollHeight;
 });
@@ -350,12 +367,27 @@ chatForm.addEventListener('submit', (e) => {
     const msg = chatInput.value.trim();
     if (msg) { socket.emit('chat-message', msg); chatInput.value = ''; }
 });
-function appendMessage(sender, msg) {
+function appendMessage(sender, msg, msgId) {
     const div = document.createElement('div');
     div.classList.add('message');
+    div.setAttribute('data-id', msgId);
     if (sender === myUsername) div.classList.add('mine');
-    div.innerHTML = `<strong>${sender}:</strong> <span>${msg}</span>`;
-    messages.appendChild(div); messages.scrollTop = messages.scrollHeight;
+    
+    let deleteBtnHtml = '';
+    if (amIAdmin) {
+        deleteBtnHtml = `<button class="delete-msg-btn" onclick="deleteMessage('${msgId}')" title="Mesajı Sil">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+        </button>`;
+    }
+
+    div.innerHTML = `
+        <div style="display:flex; justify-content:space-between; width:100%; align-items:center;">
+            <div><strong>${sender}:</strong> <span>${msg}</span></div>
+            ${deleteBtnHtml}
+        </div>
+    `;
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
 }
 
 // -----------------------------------------
@@ -450,8 +482,23 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
                 dIcon.innerHTML = headSVG;
                 statesContainer.appendChild(dIcon);
 
-                mainDiv.appendChild(circle); mainDiv.appendChild(nameSpan); mainDiv.appendChild(statesContainer);
-                li.appendChild(mainDiv);
+                 // If admin, show a kick button next to the states
+                 if (amIAdmin && id !== myPeerId) {
+                     const kickVoiceBtn = document.createElement('button');
+                     kickVoiceBtn.className = 'kick-voice-btn';
+                     kickVoiceBtn.title = "Sesten At";
+                     kickVoiceBtn.innerHTML = `×`;
+                     kickVoiceBtn.onclick = (e) => {
+                         e.stopPropagation();
+                         if (confirm(`${userDataObj.username || "Kullanıcı"} adlı kişiyi sesten atmak istediğinize emin misiniz?`)) {
+                             socket.emit('kick-from-voice', id);
+                         }
+                     };
+                     statesContainer.appendChild(kickVoiceBtn);
+                 }
+
+                 mainDiv.appendChild(circle); mainDiv.appendChild(nameSpan); mainDiv.appendChild(statesContainer);
+                 li.appendChild(mainDiv);
 
                 if (id !== myPeerId && currentVoiceRoom === r) {
                     const volDiv = document.createElement('div');
@@ -584,3 +631,148 @@ function addVideoStream(stream, peerId, username) {
     const l = document.createElement('span'); l.className = 'video-label'; l.textContent = username;
     cw.appendChild(v); cw.appendChild(l); document.getElementById('video-grid').appendChild(cw);
 }
+
+// -----------------------------------------
+// ADMİN VE DİNAMİK KANAL OYATICILARI
+// -----------------------------------------
+const textChannelsList = document.getElementById('text-channels-list');
+const voiceChannelsList = document.getElementById('voice-channels-list');
+const addTextBtn = document.getElementById('add-text-channel-btn');
+const addVoiceBtn = document.getElementById('add-voice-channel-btn');
+
+socket.on('admin-status', (isAdmin) => {
+    amIAdmin = isAdmin;
+    if (addTextBtn) addTextBtn.style.display = isAdmin ? 'block' : 'none';
+    if (addVoiceBtn) addVoiceBtn.style.display = isAdmin ? 'block' : 'none';
+});
+
+socket.on('channels-list', ({ text, voice }) => {
+    // Render text channels
+    if (textChannelsList) {
+        textChannelsList.innerHTML = '';
+        text.forEach(ch => {
+            const li = document.createElement('li');
+            li.className = `channel text-channel ${ch === currentTextRoom ? 'active' : ''}`;
+            li.setAttribute('data-room', ch);
+            
+            let deleteBtn = '';
+            if (amIAdmin && ch !== 'genel') {
+                deleteBtn = `<button class="delete-channel-btn" onclick="event.stopPropagation(); deleteChannel('${ch}', 'text')" title="Kanalı Sil">×</button>`;
+            }
+            
+            li.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+                    <div style="display:flex; align-items:center;">
+                        <svg width="20" height="24" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 6px;"><path d="M16 4h-2l-1 5h-5l1-5h-2l-1 5h-4v2h3.5l-1 5h-3.5v2h3.5l-1 5h2l1-5h5l-1 5h2l1-5h4v-2h-3.5l1-5h3.5v-2h-3.5l1-5zm-3 12h-5l1-5h5l-1 5z"/></svg>
+                        <span>${ch}</span>
+                    </div>
+                    ${deleteBtn}
+                </div>
+            `;
+            
+            li.addEventListener('click', () => {
+                if (ch !== currentTextRoom) {
+                    document.querySelectorAll('.text-channel').forEach(c => c.classList.remove('active'));
+                    li.classList.add('active');
+                    currentTextRoom = ch;
+                    document.getElementById('current-room-name').textContent = `# ${ch}`;
+                    joinTextRoom(currentTextRoom);
+                }
+            });
+            textChannelsList.appendChild(li);
+        });
+    }
+
+    // Render voice channels
+    if (voiceChannelsList) {
+        voiceChannelsList.innerHTML = '';
+        voice.forEach(ch => {
+            const li = document.createElement('li');
+            li.className = `channel voice-channel ${ch === currentVoiceRoom ? 'active' : ''}`;
+            li.setAttribute('data-room', ch);
+            
+            let deleteBtn = '';
+            if (amIAdmin) {
+                deleteBtn = `<button class="delete-channel-btn" onclick="event.stopPropagation(); deleteChannel('${ch}', 'voice')" title="Kanalı Sil">×</button>`;
+            }
+
+            li.innerHTML = `
+                 <div class="voice-channel-header" style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+                     <div style="display:flex; align-items:center;">
+                         <svg width="20" height="24" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 6px; flex-shrink: 0;"><path d="M14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/><path d="M3 9v6h4l5 5V4L7 9H3z"/></svg>
+                         <span>${ch}</span>
+                     </div>
+                     ${deleteBtn}
+                 </div>
+                 <ul class="voice-users" id="voice-users-${ch}"></ul>
+            `;
+            
+            const header = li.querySelector('.voice-channel-header');
+            header.addEventListener('click', () => {
+                if (ch !== currentVoiceRoom) connectVoiceRoom(ch);
+            });
+            
+            voiceChannelsList.appendChild(li);
+        });
+    }
+    
+    socket.emit('get-voice-state');
+});
+
+window.deleteChannel = function(name, type) {
+    if (confirm(`"${name}" kanalını silmek istediğinize emin misiniz?`)) {
+        socket.emit('delete-channel', { name, type });
+    }
+};
+
+window.deleteMessage = function(msgId) {
+    if (confirm("Bu mesajı silmek istediğinize emin misiniz?")) {
+        socket.emit('delete-message', msgId);
+    }
+};
+
+if (addTextBtn) {
+    addTextBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const name = prompt("Yeni metin kanalı adını girin:");
+        if (name) {
+            const formatted = name.trim().toLowerCase().replace(/\s+/g, '-');
+            if (formatted) {
+                socket.emit('create-channel', { name: formatted, type: 'text' });
+            }
+        }
+    });
+}
+
+if (addVoiceBtn) {
+    addVoiceBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const name = prompt("Yeni ses kanalı adını girin:");
+        if (name) {
+            const formatted = name.trim();
+            if (formatted) {
+                socket.emit('create-channel', { name: formatted, type: 'voice' });
+            }
+        }
+    });
+}
+
+socket.on('message-deleted', (msgId) => {
+    const msgEl = document.querySelector(`.message[data-id="${msgId}"]`);
+    if (msgEl) {
+        msgEl.remove();
+    }
+});
+
+socket.on('kicked-from-voice', () => {
+    alert("Bir yönetici tarafından sesli kanaldan atıldınız.");
+    disconnectVoiceRoom();
+});
+
+socket.on('kicked-from-server', () => {
+    alert("Yönetici tarafından sunucudan atıldınız!");
+    localStorage.removeItem('username');
+    localStorage.removeItem('userId');
+    localStorage.removeItem('avatar');
+    location.reload();
+});
