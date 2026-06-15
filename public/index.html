@@ -128,18 +128,31 @@
                  <span>DEĞİŞTİR</span>
               </div>
            </div>
+           <div id="profile-modal-badges" class="profile-badges" style="display: none;">
+              <!-- Sunucu Sahibi Tacı & Geliştirici Rozeti buraya gelecek -->
+           </div>
            <input type="file" id="avatar-file-input" accept="image/*" style="display: none;">
         </div>
         <div class="profile-body">
            <label for="profile-username-input">Kullanıcı Adı</label>
            <div class="profile-input-wrapper">
               <input type="text" id="profile-username-input" autocomplete="off" placeholder="Takma adınızı yazın...">
-              <span class="profile-tag-suffix">#1000</span>
            </div>
 
-           <label for="profile-admin-key" style="margin-top: 10px;">Yönetici Anahtarı (Gizli)</label>
+           <label for="profile-admin-key" style="margin-top: 10px;">Yönetici Anahtarı</label>
            <div class="profile-input-wrapper">
               <input type="password" id="profile-admin-key" autocomplete="off" placeholder="Yönetici anahtarını girin...">
+           </div>
+
+           <div class="profile-user-card-details">
+              <div class="detail-item">
+                 <span class="detail-label">Sunucu Rolü</span>
+                 <span id="profile-modal-role" class="detail-value">Üye</span>
+              </div>
+              <div class="detail-item">
+                 <span class="detail-label">Lonca Üyeliği</span>
+                 <span class="detail-value">Aktif Üye</span>
+              </div>
            </div>
 
            <div class="profile-actions" style="justify-content: flex-end;">

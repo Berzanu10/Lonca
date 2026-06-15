@@ -87,6 +87,7 @@ function saveMessages() {
    }
 }
 
+const allTimeUsers = {};
 const ADMIN_KEY = process.env.ADMIN_KEY || "berzan123";
 
 io.on('connection', (socket) => {

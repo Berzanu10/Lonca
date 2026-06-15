@@ -95,6 +95,31 @@ function openProfileModal() {
     const adminKeyInput = document.getElementById('profile-admin-key');
     if (adminKeyInput) adminKeyInput.value = myAdminToken;
 
+    // Badges & role updating
+    const badgesDiv = document.getElementById('profile-modal-badges');
+    const roleSpan = document.getElementById('profile-modal-role');
+    
+    if (amIAdmin) {
+        if (roleSpan) roleSpan.textContent = 'Sunucu Sahibi / Yönetici';
+        if (badgesDiv) {
+            badgesDiv.innerHTML = `
+                <div class="badge-icon" title="Sunucu Sahibi (Taç)">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="#FEE75C"><path d="M2 22h20V2L15 9l-3-6-3 6L2 2z"/></svg>
+                </div>
+                <div class="badge-icon" title="Geliştirici">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="#5865F2"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+                </div>
+            `;
+            badgesDiv.style.display = 'flex';
+        }
+    } else {
+        if (roleSpan) roleSpan.textContent = 'Üye';
+        if (badgesDiv) {
+            badgesDiv.innerHTML = '';
+            badgesDiv.style.display = 'none';
+        }
+    }
+
     if (myAvatar) {
         modalAvatarPreview.style.backgroundImage = `url(${myAvatar})`;
         modalAvatarPreview.style.backgroundSize = 'cover';
