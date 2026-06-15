@@ -346,7 +346,7 @@ if (forgotSendForm) {
         .then(r => r.json())
         .then(data => {
             if (data.success) {
-                showCustomAlert("Kod Gönderildi", `Şifre sıfırlama kodu gönderildi! Test Kodu: ${data.code}`, () => {
+                showCustomAlert("Kod Gönderildi", `Şifre sıfırlama kodu e-postanıza gönderildi! Lütfen e-postanızı kontrol edin.`, () => {
                     forgotSendForm.style.display = 'none';
                     forgotResetForm.style.display = 'block';
                     resetCodeInput.focus();
@@ -528,13 +528,46 @@ function initGoogleAuth() {
 
 initGoogleAuth();
 
+function triggerForcedValidationErrors() {
+    const modalContent = document.querySelector('.profile-modal-content');
+    const usernameInput = document.getElementById('profile-username-input');
+    const wrapper = usernameInput ? usernameInput.closest('.profile-input-wrapper') : null;
+    
+    if (modalContent) {
+        modalContent.classList.remove('shake');
+        void modalContent.offsetWidth; // Trigger reflow
+        modalContent.classList.add('shake');
+        modalContent.addEventListener('animationend', () => {
+            modalContent.classList.remove('shake');
+        }, { once: true });
+    }
+    
+    if (wrapper && usernameInput) {
+        wrapper.classList.add('input-error');
+        const clearError = () => {
+            wrapper.classList.remove('input-error');
+            usernameInput.removeEventListener('input', clearError);
+        };
+        usernameInput.addEventListener('input', clearError);
+    }
+}
+
+function handleCloseAttempt() {
+    const newName = profileUsernameInput.value.trim();
+    if (!newName) {
+        triggerForcedValidationErrors();
+    } else {
+        profileSaveBtn.click();
+    }
+}
+
 function openProfileModal(isForceEdit = false) {
     isProfileModalForced = isForceEdit;
     
-    // Kapatma tuşunu ilk girişte gizle
+    // Kapatma tuşu her zaman açık kalır
     const closeBtn = document.getElementById('profile-close-btn');
     if (closeBtn) {
-        closeBtn.style.display = isForceEdit ? 'none' : 'block';
+        closeBtn.style.display = 'block';
     }
 
     profileUsernameInput.value = myUsername || '';
@@ -573,35 +606,14 @@ function openProfileModal(isForceEdit = false) {
         modalAvatarPreview.style.backgroundImage = '';
     }
 
-    // İlk giriş uyarısı
-    let forcedNotice = document.getElementById('profile-modal-forced-notice');
-    if (isForceEdit) {
-        if (!forcedNotice) {
-            forcedNotice = document.createElement('div');
-            forcedNotice.id = 'profile-modal-forced-notice';
-            forcedNotice.style.color = '#FEE75C';
-            forcedNotice.style.fontSize = '0.8rem';
-            forcedNotice.style.fontWeight = 'bold';
-            forcedNotice.style.textAlign = 'center';
-            forcedNotice.style.marginBottom = '12px';
-            forcedNotice.style.backgroundColor = 'rgba(254, 231, 92, 0.1)';
-            forcedNotice.style.padding = '8px';
-            forcedNotice.style.borderRadius = '4px';
-            forcedNotice.textContent = 'Lonca\'ya İlk Giriş! Lütfen bir kullanıcı adı belirleyin (Zorunlu).';
-            profileModal.querySelector('.profile-body').prepend(forcedNotice);
-        }
-    } else {
-        if (forcedNotice) forcedNotice.remove();
-    }
-
     profileModal.style.display = 'flex';
 }
 
 if (currentUserInfo) {
-    currentUserInfo.addEventListener('click', openProfileModal);
+    currentUserInfo.addEventListener('click', () => openProfileModal(false));
 }
 if (settingsBtn) {
-    settingsBtn.addEventListener('click', openProfileModal);
+    settingsBtn.addEventListener('click', () => openProfileModal(false));
 }
 
 if (modalAvatarPreview && avatarFileInput) {
@@ -653,7 +665,10 @@ if (modalAvatarPreview && avatarFileInput) {
 const profileCloseBtn = document.getElementById('profile-close-btn');
 if (profileCloseBtn) {
     profileCloseBtn.addEventListener('click', () => {
-        if (isProfileModalForced) return;
+        if (isProfileModalForced) {
+            handleCloseAttempt();
+            return;
+        }
         profileModal.style.display = 'none';
         if (modalAvatarPreview) delete modalAvatarPreview.dataset.tempAvatar;
     });
@@ -665,6 +680,7 @@ document.addEventListener('keydown', (e) => {
         if (isProfileModalForced) {
             e.preventDefault();
             e.stopPropagation();
+            handleCloseAttempt();
         }
     }
 });
@@ -673,7 +689,11 @@ if (profileSaveBtn) {
     profileSaveBtn.addEventListener('click', () => {
         const newName = profileUsernameInput.value.trim();
         if (!newName) {
-            showCustomAlert("Hata", "Kullanıcı adı boş olamaz.");
+            if (isProfileModalForced) {
+                triggerForcedValidationErrors();
+            } else {
+                showCustomAlert("Hata", "Kullanıcı adı boş olamaz.");
+            }
             return;
         }
         
