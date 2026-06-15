@@ -16,15 +16,254 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-color); color: var(--text-main); height: 100vh; display: flex; overflow: hidden; }
 
-/* Giriş Ekranı */
-#login-screen {
-  background-color: var(--panel-color); padding: 2.5rem; border-radius: var(--border-radius);
-  text-align: center; box-shadow: 0 8px 24px rgba(0,0,0,0.5); width: 350px;
-  position: absolute; top:50%; left:50%; transform:translate(-50%, -50%); z-index: 100;
+/* Giriş ve Kayıt Ekranı (Split Screen) */
+#login-screen-wrapper {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: var(--bg-color);
+  background-image: radial-gradient(circle at 10% 20%, rgba(88, 101, 242, 0.08) 0%, transparent 40%),
+                    radial-gradient(circle at 90% 80%, rgba(67, 181, 129, 0.05) 0%, transparent 45%);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  padding: 1.5rem;
 }
-#login-screen h2 { margin-bottom: 2rem; color: #fff; }
-#login-screen input { padding: 1rem; border-radius: 4px; border: 1px solid #202225; background-color: var(--input-bg); color: var(--text-main); outline: none; width: 100%; margin-bottom: 1.5rem; }
-#login-screen button { padding: 1rem; background-color: var(--highlight-color); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; }
+
+#login-container {
+  display: flex;
+  width: 860px;
+  min-height: 520px;
+  background-color: rgba(40, 43, 48, 0.9);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6),
+              0 0 0 1px rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+  animation: modalEntrance 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes modalEntrance {
+  from { opacity: 0; transform: scale(0.96) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* Sol Panel - Görsel ve Degrade */
+.login-left-panel {
+  flex: 1.1;
+  background: linear-gradient(135deg, #4f5bbf 0%, #2b3136 100%);
+  padding: 3rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  border-right: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.login-left-panel .brand-logo {
+  color: #fff;
+  margin-bottom: 1.5rem;
+  animation: float 4s ease-in-out infinite;
+  z-index: 2;
+}
+
+.login-left-panel h1 {
+  font-size: 2.2rem;
+  color: #fff;
+  font-weight: 800;
+  margin-bottom: 0.8rem;
+  letter-spacing: -0.5px;
+  z-index: 2;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.login-left-panel p {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.95rem;
+  line-height: 1.6;
+  max-width: 280px;
+  z-index: 2;
+}
+
+.login-left-panel .glowing-orb {
+  position: absolute;
+  width: 250px;
+  height: 250px;
+  background: radial-gradient(circle, rgba(88, 101, 242, 0.35) 0%, transparent 70%);
+  bottom: -50px;
+  left: -50px;
+  border-radius: 50%;
+  filter: blur(20px);
+  pointer-events: none;
+  animation: orbPulse 8s ease-in-out infinite alternate;
+}
+
+@keyframes float {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+  100% { transform: translateY(0px); }
+}
+
+@keyframes orbPulse {
+  0% { transform: scale(1) translate(0, 0); opacity: 0.8; }
+  100% { transform: scale(1.2) translate(30px, -20px); opacity: 1; }
+}
+
+/* Sağ Panel - Formlar */
+.login-right-panel {
+  flex: 1;
+  padding: 2.8rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background-color: var(--panel-color);
+}
+
+.login-right-panel h2 {
+  font-size: 1.6rem;
+  color: #fff;
+  font-weight: 700;
+  margin-bottom: 0.4rem;
+}
+
+.login-right-panel .subtitle {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-bottom: 2rem;
+}
+
+.input-group {
+  margin-bottom: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.input-group label {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.input-group input {
+  padding: 0.85rem 1rem;
+  border-radius: 4px;
+  border: 1px solid #111214;
+  background-color: #1e1f22;
+  color: var(--text-main);
+  outline: none;
+  font-size: 0.95rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.input-group input:focus {
+  border-color: var(--highlight-color);
+  box-shadow: 0 0 0 2px rgba(88, 101, 242, 0.15);
+}
+
+.auth-submit-btn {
+  padding: 0.85rem;
+  background-color: var(--highlight-color);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.95rem;
+  width: 100%;
+  margin-top: 0.5rem;
+  transition: background-color 0.15s ease, transform 0.1s ease;
+}
+
+.auth-submit-btn:hover {
+  background-color: #4752c4;
+}
+
+.auth-submit-btn:active {
+  transform: scale(0.98);
+}
+
+.toggle-text {
+  text-align: center;
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.toggle-text a {
+  color: var(--highlight-color);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.toggle-text a:hover {
+  text-decoration: underline;
+}
+
+/* Google Giriş Kısmı */
+.google-login-section {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.auth-separator {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  margin: 1.5rem 0;
+}
+
+.auth-separator::before,
+.auth-separator::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.auth-separator:not(:empty)::before {
+  margin-right: .5em;
+}
+
+.auth-separator:not(:empty)::after {
+  margin-left: .5em;
+}
+
+.google-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0.85rem;
+  background-color: #fff;
+  color: #2e3035;
+  border: 1px solid #dadce0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.95rem;
+  width: 100%;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.google-btn:hover {
+  background-color: #f8f9fa;
+  border-color: #c6c6c6;
+}
+
+.google-btn svg {
+  flex-shrink: 0;
+}
 
 #app-container { display: flex; width: 100%; height: 100%; }
 
@@ -216,8 +455,16 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
     padding-bottom: 2rem;
   }
   
-  #login-screen { 
-    width: 90%; 
+  #login-container {
+    flex-direction: column;
+    width: 100%;
+    min-height: auto;
+  }
+  .login-left-panel {
+    display: none;
+  }
+  .login-right-panel {
+    padding: 2rem 1.5rem;
   }
 
   /* Videolar mobilde tek kolon olsun */
@@ -827,6 +1074,30 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
   color: #fff;
 }
 .modal-close-btn:active {
+  transform: scale(0.95);
+}
+
+/* Canlı Yayın Badgesi */
+.voice-live-badge {
+  background-color: var(--danger-color);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.65rem;
+  font-weight: 800;
+  cursor: pointer;
+  margin-left: 6px;
+  transition: opacity 0.15s ease, transform 0.1s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-transform: uppercase;
+}
+.voice-live-badge:hover {
+  opacity: 0.9;
+}
+.voice-live-badge:active {
   transform: scale(0.95);
 }
 

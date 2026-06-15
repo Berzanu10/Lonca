@@ -24,7 +24,295 @@ const peerServer = ExpressPeerServer(server, {
 });
 
 app.use('/peerjs', peerServer);
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(express.static('public'));
+
+const crypto = require('crypto');
+
+// USERS FILE DATABASE
+const USERS_FILE = path.join(__dirname, 'users.json');
+let usersDb = {};
+try {
+   if (fs.existsSync(USERS_FILE)) {
+      usersDb = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
+   } else {
+      fs.writeFileSync(USERS_FILE, JSON.stringify(usersDb, null, 2), 'utf8');
+   }
+} catch (err) {
+   console.error("Kullanıcılar yüklenirken hata oluştu:", err);
+}
+
+function saveUsers() {
+   try {
+      fs.writeFileSync(USERS_FILE, JSON.stringify(usersDb, null, 2), 'utf8');
+   } catch (err) {
+      console.error("Kullanıcılar kaydedilirken hata oluştu:", err);
+   }
+}
+
+// CRYPTO HELPERS FOR PASSWORDS
+function hashPassword(password) {
+   const salt = crypto.randomBytes(16).toString('hex');
+   const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+   return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, storedPassword) {
+   if (!storedPassword || !storedPassword.includes(':')) return false;
+   const [salt, hash] = storedPassword.split(':');
+   const verifyHash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+   return hash === verifyHash;
+}
+
+// PURE NODE.JS JWT SYSTEM (ZERO DEPENDENCIES)
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
+
+function generateToken(payload) {
+   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+   const signature = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${body}`).digest('base64url');
+   return `${header}.${body}.${signature}`;
+}
+
+function verifyToken(token) {
+   try {
+      const parts = token.split('.');
+      if (parts.length !== 3) return null;
+      const [header, body, signature] = parts;
+      const validSignature = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${body}`).digest('base64url');
+      if (signature !== validSignature) return null;
+      return JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+   } catch (e) {
+      return null;
+   }
+}
+
+function decodeJwt(token) {
+   try {
+      const parts = token.split('.');
+      if (parts.length !== 3) return null;
+      const payloadJson = Buffer.from(parts[1], 'base64').toString('utf8');
+      return JSON.parse(payloadJson);
+   } catch (e) {
+      return null;
+   }
+}
+
+// CONFIG ENDPOINT
+app.get('/api/config', (req, res) => {
+   res.json({
+      googleClientId: process.env.GOOGLE_CLIENT_ID || ""
+   });
+});
+
+// AUTH MIDDLEWARE
+function authenticateToken(req, res, next) {
+   const authHeader = req.headers.authorization;
+   const token = authHeader && authHeader.split(' ')[1];
+   if (!token) return res.status(401).json({ error: 'Token bulunamadı.' });
+
+   const payload = verifyToken(token);
+   if (!payload) return res.status(403).json({ error: 'Geçersiz veya süresi dolmuş token.' });
+
+   req.user = payload;
+   next();
+}
+
+// GET CURRENT USER (/api/auth/me)
+app.get('/api/auth/me', (req, res) => {
+   const authHeader = req.headers.authorization;
+   const token = authHeader && authHeader.split(' ')[1];
+   if (!token) return res.status(401).json({ error: 'Token bulunamadı.' });
+
+   const payload = verifyToken(token);
+   if (!payload) return res.status(401).json({ error: 'Geçersiz veya süresi dolmuş token.' });
+
+   const user = usersDb[payload.userId];
+   if (!user) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+
+   res.json({
+      success: true,
+      user: {
+         id: user.id,
+         username: user.username,
+         email: user.email,
+         avatar: user.avatar || '',
+         isAdmin: user.isAdmin
+      }
+   });
+});
+
+// REGISTER ENDPOINT
+app.post('/api/auth/register', (req, res) => {
+   const { username, email, password } = req.body;
+   if (!username || !email || !password) {
+      return res.status(400).json({ error: 'Lütfen tüm alanları doldurun.' });
+   }
+
+   const normalizedEmail = email.toLowerCase().trim();
+   
+   // Check if user exists
+   const existingUser = Object.values(usersDb).find(u => u.email === normalizedEmail);
+   if (existingUser) {
+      return res.status(400).json({ error: 'Bu e-posta adresiyle zaten kayıtlı bir kullanıcı var.' });
+   }
+
+   const userId = 'user_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+   
+   usersDb[userId] = {
+      id: userId,
+      username: username.trim(),
+      email: normalizedEmail,
+      password: hashPassword(password),
+      avatar: '',
+      isAdmin: false
+   };
+
+   saveUsers();
+
+   const token = generateToken({ userId: userId });
+   res.json({
+      success: true,
+      token,
+      user: {
+         id: userId,
+         username: usersDb[userId].username,
+         email: normalizedEmail,
+         avatar: '',
+         isAdmin: false
+      }
+   });
+});
+
+// LOGIN ENDPOINT
+app.post('/api/auth/login', (req, res) => {
+   const { email, password } = req.body;
+   if (!email || !password) {
+      return res.status(400).json({ error: 'Lütfen e-posta ve şifrenizi girin.' });
+   }
+
+   const normalizedEmail = email.toLowerCase().trim();
+   const user = Object.values(usersDb).find(u => u.email === normalizedEmail);
+
+   if (!user || !user.password || !verifyPassword(password, user.password)) {
+      return res.status(400).json({ error: 'E-posta veya şifre hatalı.' });
+   }
+
+   const token = generateToken({ userId: user.id });
+   res.json({
+      success: true,
+      token,
+      user: {
+         id: user.id,
+         username: user.username,
+         email: user.email,
+         avatar: user.avatar || '',
+         isAdmin: user.isAdmin
+      }
+   });
+});
+
+// GOOGLE SIGN IN
+app.post('/api/auth/google', (req, res) => {
+   const { credential, mock, email, name, picture } = req.body;
+   let googleEmail, googleName, googlePicture, googleSub;
+
+   if (mock) {
+      if (!email) return res.status(400).json({ error: 'Mock e-posta adresi eksik.' });
+      googleEmail = email.toLowerCase().trim();
+      googleName = name || googleEmail.split('@')[0];
+      googlePicture = picture || '';
+      googleSub = 'mock_google_' + googleEmail;
+   } else {
+      if (!credential) return res.status(400).json({ error: 'Google kimlik verisi eksik.' });
+      const decoded = decodeJwt(credential);
+      if (!decoded || (decoded.iss !== 'accounts.google.com' && decoded.iss !== 'https://accounts.google.com')) {
+         return res.status(400).json({ error: 'Geçersiz Google kimlik doğrulaması.' });
+      }
+      googleEmail = decoded.email.toLowerCase().trim();
+      googleName = decoded.name;
+      googlePicture = decoded.picture || '';
+      googleSub = decoded.sub;
+   }
+
+   // Find or create user
+   let user = Object.values(usersDb).find(u => u.email === googleEmail || u.googleId === googleSub);
+
+   if (!user) {
+      const userId = 'user_g_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+      usersDb[userId] = {
+         id: userId,
+         username: googleName,
+         email: googleEmail,
+         googleId: googleSub,
+         avatar: googlePicture,
+         isAdmin: false
+      };
+      user = usersDb[userId];
+      saveUsers();
+   } else {
+      // Update avatar if we got it from google and didn't have one before
+      let changed = false;
+      if (googlePicture && !user.avatar) {
+         user.avatar = googlePicture;
+         changed = true;
+      }
+      if (googleSub && !user.googleId) {
+         user.googleId = googleSub;
+         changed = true;
+      }
+      if (changed) saveUsers();
+   }
+
+   const token = generateToken({ userId: user.id });
+   res.json({
+      success: true,
+      token,
+      user: {
+         id: user.id,
+         username: user.username,
+         email: user.email,
+         avatar: user.avatar || '',
+         isAdmin: user.isAdmin
+      }
+   });
+});
+
+// PROFILE UPDATE ENDPOINT
+app.post('/api/users/profile', authenticateToken, (req, res) => {
+   const { username, avatar, adminToken } = req.body;
+   const userId = req.user.userId;
+
+   const user = usersDb[userId];
+   if (!user) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+
+   if (username && username.trim()) {
+      user.username = username.trim();
+   }
+
+   if (avatar !== undefined) {
+      user.avatar = avatar;
+   }
+
+   // Update Admin status if adminToken is passed
+   if (adminToken !== undefined) {
+      user.isAdmin = (adminToken === ADMIN_KEY);
+   }
+
+   saveUsers();
+
+   res.json({
+      success: true,
+      user: {
+         id: user.id,
+         username: user.username,
+         email: user.email,
+         avatar: user.avatar || '',
+         isAdmin: user.isAdmin
+      }
+   });
+});
 
 const CHANNELS_FILE = path.join(__dirname, 'channels.json');
 let textRooms = { 'genel': {}, 'oyun': {}, 'muzik': {} };
@@ -106,19 +394,29 @@ io.on('connection', (socket) => {
    socket.on('register', (peerId, username, userId, avatar, adminToken) => {
       const uId = userId || peerId;
       socket.peerId = peerId;
-      socket.username = username;
-      socket.userId = uId;
-      socket.avatar = avatar || '';
       
-      const isAdmin = (adminToken === ADMIN_KEY);
+      // Get stored user info from DB if possible
+      let finalUsername = username;
+      let finalAvatar = avatar || '';
+      let isAdmin = (adminToken === ADMIN_KEY);
+      
+      if (usersDb[uId]) {
+         finalUsername = usersDb[uId].username || username;
+         finalAvatar = usersDb[uId].avatar || avatar || '';
+         isAdmin = usersDb[uId].isAdmin || isAdmin;
+      }
+      
+      socket.username = finalUsername;
+      socket.userId = uId;
+      socket.avatar = finalAvatar;
       socket.isAdmin = isAdmin;
 
       allTimeUsers[uId] = {
-         username: username,
+         username: finalUsername,
          isOnline: true,
          peerId: peerId,
          userId: uId,
-         avatar: avatar || '',
+         avatar: finalAvatar,
          isAdmin: isAdmin
       };
 
@@ -319,6 +617,27 @@ io.on('connection', (socket) => {
       messageHistory[roomId] = messageHistory[roomId].filter(m => !msgIds.includes(m.id));
       saveMessages();
       io.to('text-' + roomId).emit('messages-bulk-deleted', msgIds);
+   });
+
+   socket.on('start-screen-share', () => {
+      if (socket.voiceRoom && voiceRooms[socket.voiceRoom] && voiceRooms[socket.voiceRoom][socket.peerId]) {
+         voiceRooms[socket.voiceRoom][socket.peerId].isSharingScreen = true;
+         io.emit('voice-rooms-state', voiceRooms);
+      }
+   });
+
+   socket.on('stop-screen-share', () => {
+      if (socket.voiceRoom && voiceRooms[socket.voiceRoom] && voiceRooms[socket.voiceRoom][socket.peerId]) {
+         voiceRooms[socket.voiceRoom][socket.peerId].isSharingScreen = false;
+         io.emit('voice-rooms-state', voiceRooms);
+      }
+   });
+
+   socket.on('request-screen-share-stream', ({ targetPeerId, requesterPeerId }) => {
+      const targetSocket = [...io.sockets.sockets.values()].find(s => s.peerId === targetPeerId);
+      if (targetSocket) {
+         targetSocket.emit('screen-share-requested', { requesterPeerId });
+      }
    });
 
    socket.on('disconnect', () => {

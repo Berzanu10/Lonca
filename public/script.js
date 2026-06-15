@@ -23,6 +23,10 @@ let activeRoomMessages = [];
 let isSelectionMode = false;
 let selectedMessageIds = new Set();
 
+let localScreenStream = null;
+let screenShareCalls = {};
+let screenShareStreams = {};
+
 let audioContext = null;
 const analysers = {};
 
@@ -30,10 +34,22 @@ let isMicMuted = false;
 let isDeafened = false;
 let prevMicMuted = false;
 
-const loginScreen = document.getElementById('login-screen');
+const loginScreenWrapper = document.getElementById('login-screen-wrapper');
 const appContainer = document.getElementById('app-container');
-const joinBtn = document.getElementById('join-btn');
-const usernameInput = document.getElementById('username-input');
+const loginView = document.getElementById('login-view');
+const signupView = document.getElementById('signup-view');
+const showSignupLink = document.getElementById('show-signup');
+const showLoginLink = document.getElementById('show-login');
+
+// Form elemanları
+const loginFormEl = document.getElementById('login-form-el');
+const signupFormEl = document.getElementById('signup-form-el');
+const loginEmailInput = document.getElementById('login-email');
+const loginPasswordInput = document.getElementById('login-password');
+const signupUsernameInput = document.getElementById('signup-username');
+const signupEmailInput = document.getElementById('signup-email');
+const signupPasswordInput = document.getElementById('signup-password');
+const customGoogleBtn = document.getElementById('custom-google-btn');
 
 const usersList = document.getElementById('users-list');
 const messages = document.getElementById('messages');
@@ -170,37 +186,242 @@ const profileCancelBtn = document.getElementById('profile-cancel-btn');
 const micSVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>`;
 const headSVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c-4.97 0-9 4.03-9 9v7c0 1.1.9 2 2 2h4v-8H5v-1c0-3.87 3.13-7 7-7s7 3.13 7 7v1h-4v8h4c1.1 0 2-.9 2-2v-7c0-4.97-4.03-9-9-9z"/></svg>`;
 
-// Check if username is saved in localStorage
-const savedUsername = localStorage.getItem('username');
-if (savedUsername) {
-    myUsername = savedUsername;
+// ONAYLANAN GİRİŞ İŞLEMİNİ YÖNETEN YARDIMCI FONKSİYON
+function handleLoginSuccess(data) {
+    myUsername = data.user.username;
+    myUserId = data.user.id;
+    myAvatar = data.user.avatar || '';
+    amIAdmin = data.user.isAdmin;
+
+    localStorage.setItem('sessionToken', data.token);
+    localStorage.setItem('username', myUsername);
+    localStorage.setItem('userId', myUserId);
+    localStorage.setItem('avatar', myAvatar);
+
     displayMyUsername.textContent = myUsername;
     const myAv = document.getElementById('my-avatar');
-    if (myAv && myAvatar) {
-        myAv.style.backgroundImage = `url(${myAvatar})`;
-        myAv.style.backgroundSize = 'cover';
+    if (myAv) {
+        if (myAvatar) {
+            myAv.style.backgroundImage = `url(${myAvatar})`;
+            myAv.style.backgroundSize = 'cover';
+            myAv.style.color = 'transparent';
+            myAv.textContent = '';
+        } else {
+            myAv.style.backgroundImage = '';
+            myAv.style.color = '';
+            myAv.textContent = myUsername.charAt(0).toUpperCase();
+        }
     }
-    loginScreen.style.display = 'none';
-    appContainer.style.display = 'flex';
+
+    if (loginScreenWrapper) loginScreenWrapper.style.display = 'none';
+    if (appContainer) appContainer.style.display = 'flex';
     initializePeer();
 }
 
-joinBtn.addEventListener('click', () => {
-    const name = usernameInput.value.trim();
-    if (name) {
-        myUsername = name;
-        localStorage.setItem('username', name);
-        displayMyUsername.textContent = myUsername;
-        const myAv = document.getElementById('my-avatar');
-        if (myAv && myAvatar) {
-            myAv.style.backgroundImage = `url(${myAvatar})`;
-            myAv.style.backgroundSize = 'cover';
+function clearSession() {
+    localStorage.removeItem('sessionToken');
+    localStorage.removeItem('username');
+    localStorage.removeItem('userId');
+    localStorage.removeItem('avatar');
+}
+
+function showLoginScreen() {
+    if (loginScreenWrapper) loginScreenWrapper.style.display = 'flex';
+    if (appContainer) appContainer.style.display = 'none';
+}
+
+// Oturum doğrulama kontrolü
+const sessionToken = localStorage.getItem('sessionToken');
+if (sessionToken) {
+    fetch('/api/auth/me', {
+        headers: { 'Authorization': `Bearer ${sessionToken}` }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            handleLoginSuccess(data);
+        } else {
+            clearSession();
+            showLoginScreen();
         }
-        loginScreen.style.display = 'none';
-        appContainer.style.display = 'flex';
-        initializePeer();
-    } else showCustomAlert("Hata", "Takma ad boş olamaz.");
-});
+    })
+    .catch(() => {
+        clearSession();
+        showLoginScreen();
+    });
+} else {
+    showLoginScreen();
+}
+
+// Form ve Görünüm Geçişleri
+if (showSignupLink) {
+    showSignupLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        loginView.style.display = 'none';
+        signupView.style.display = 'block';
+    });
+}
+
+if (showLoginLink) {
+    showLoginLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        signupView.style.display = 'none';
+        loginView.style.display = 'block';
+    });
+}
+
+// Giriş Formu Submit Dinleyicisi
+if (loginFormEl) {
+    loginFormEl.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const email = loginEmailInput.value.trim();
+        const password = loginPasswordInput.value;
+        
+        fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                handleLoginSuccess(data);
+            } else {
+                showCustomAlert("Hata", data.error || "Giriş yapılamadı.");
+            }
+        })
+        .catch(() => {
+            showCustomAlert("Hata", "Sunucu ile bağlantı kurulamadı.");
+        });
+    });
+}
+
+// Kayıt Formu Submit Dinleyicisi
+if (signupFormEl) {
+    signupFormEl.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const username = signupUsernameInput.value.trim();
+        const email = signupEmailInput.value.trim();
+        const password = signupPasswordInput.value;
+        
+        if (password.length < 6) {
+            showCustomAlert("Hata", "Şifre en az 6 karakter olmalıdır.");
+            return;
+        }
+        
+        fetch('/api/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, email, password })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                handleLoginSuccess(data);
+            } else {
+                showCustomAlert("Hata", data.error || "Kayıt işlemi başarısız.");
+            }
+        })
+        .catch(() => {
+            showCustomAlert("Hata", "Sunucu ile bağlantı kurulamadı.");
+        });
+    });
+}
+
+// Google ve Mock Google Giriş Entegrasyonları
+function handleCredentialResponse(response) {
+    fetch('/api/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential: response.credential })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            handleLoginSuccess(data);
+        } else {
+            showCustomAlert("Hata", data.error || "Google ile giriş yapılamadı.");
+        }
+    })
+    .catch(() => {
+        showCustomAlert("Hata", "Google kimlik doğrulama sunucusuna erişilemedi.");
+    });
+}
+
+function showMockGoogleLogin() {
+    showCustomPrompt("Google ile Giriş (Mock)", "Google E-posta adresinizi girin...", (email) => {
+        if (!email) return;
+        if (!email.includes('@')) {
+            showCustomAlert("Hata", "Geçersiz e-posta adresi.");
+            return;
+        }
+        const namePart = email.split('@')[0];
+        const name = namePart.charAt(0).toUpperCase() + namePart.slice(1);
+        const mockAvatar = `https://api.dicebear.com/7.x/identicon/svg?seed=${namePart}`;
+        
+        fetch('/api/auth/google', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                mock: true,
+                email: email,
+                name: name,
+                picture: mockAvatar
+            })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                handleLoginSuccess(data);
+            } else {
+                showCustomAlert("Hata", data.error || "Giriş yapılamadı.");
+            }
+        })
+        .catch(() => {
+            showCustomAlert("Hata", "Giriş sırasında hata oluştu.");
+        });
+    });
+}
+
+function initGoogleAuth() {
+    fetch('/api/config')
+        .then(r => r.json())
+        .then(config => {
+            if (config.googleClientId) {
+                if (typeof google !== 'undefined') {
+                    google.accounts.id.initialize({
+                        client_id: config.googleClientId,
+                        callback: handleCredentialResponse
+                    });
+                    google.accounts.id.renderButton(
+                        document.getElementById("google-signin-container"),
+                        { theme: "outline", size: "large", width: "100%" }
+                    );
+                } else {
+                    setTimeout(initGoogleAuth, 1000);
+                }
+            } else {
+                if (customGoogleBtn) {
+                    customGoogleBtn.style.display = "flex";
+                    customGoogleBtn.onclick = (e) => {
+                        e.preventDefault();
+                        showMockGoogleLogin();
+                    };
+                }
+            }
+        })
+        .catch(() => {
+            if (customGoogleBtn) {
+                customGoogleBtn.style.display = "flex";
+                customGoogleBtn.onclick = (e) => {
+                    e.preventDefault();
+                    showMockGoogleLogin();
+                };
+            }
+        });
+}
+
+initGoogleAuth();
 
 function openProfileModal() {
     profileUsernameInput.value = myUsername;
@@ -309,21 +530,43 @@ if (profileSaveBtn) {
             showCustomAlert("Hata", "Kullanıcı adı boş olamaz.");
             return;
         }
-        localStorage.setItem('username', newName);
-        if (modalAvatarPreview && modalAvatarPreview.dataset.tempAvatar) {
-            localStorage.setItem('avatar', modalAvatarPreview.dataset.tempAvatar);
-        }
         
-        // Save Admin Token
         const adminKeyVal = document.getElementById('profile-admin-key').value.trim();
-        if (adminKeyVal) {
-            localStorage.setItem('adminToken', adminKeyVal);
-        } else {
-            localStorage.removeItem('adminToken');
-        }
+        const avatarData = (modalAvatarPreview && modalAvatarPreview.dataset.tempAvatar) ? modalAvatarPreview.dataset.tempAvatar : myAvatar;
 
-        profileModal.style.display = 'none';
-        location.reload();
+        const sessionToken = localStorage.getItem('sessionToken');
+
+        fetch('/api/users/profile', {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${sessionToken}`
+            },
+            body: JSON.stringify({
+                username: newName,
+                avatar: avatarData,
+                adminToken: adminKeyVal
+            })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                localStorage.setItem('username', data.user.username);
+                localStorage.setItem('avatar', data.user.avatar || '');
+                if (adminKeyVal) {
+                    localStorage.setItem('adminToken', adminKeyVal);
+                } else {
+                    localStorage.removeItem('adminToken');
+                }
+                profileModal.style.display = 'none';
+                location.reload();
+            } else {
+                showCustomAlert("Hata", data.error || "Profil güncellenemedi.");
+            }
+        })
+        .catch(() => {
+            showCustomAlert("Hata", "Sunucu ile bağlantı kurulamadı.");
+        });
     });
 }
 
@@ -356,6 +599,23 @@ function initializePeer() {
             call.on('close', () => {
                 removeRemoteAudio(call.peer);
                 stopMonitor(call.peer);
+            });
+            return;
+        }
+
+        if (call.metadata && call.metadata.type === 'screen-share') {
+            call.answer();
+            call.on('stream', remoteStream => {
+                screenShareStreams[call.peer] = remoteStream;
+                socket.emit('get-voice-state');
+            });
+            call.on('close', () => {
+                delete screenShareStreams[call.peer];
+                const watchModal = document.getElementById('screen-watch-modal');
+                if (watchModal.style.display === 'flex' && watchModal.dataset.watchingPeerId === call.peer) {
+                    closeScreenWatchModal();
+                }
+                socket.emit('get-voice-state');
             });
             return;
         }
@@ -849,6 +1109,21 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
                     statesContainer.appendChild(kickVoiceBtn);
                 }
 
+                if (userDataObj.isSharingScreen) {
+                    const liveBtn = document.createElement('button');
+                    liveBtn.className = 'voice-live-badge';
+                    liveBtn.innerHTML = 'YAYIN';
+                    if (id !== myPeerId) {
+                        liveBtn.onclick = (e) => {
+                            e.stopPropagation();
+                            watchScreenShare(id, userDataObj.username || "Kullanıcı");
+                        };
+                    } else {
+                        liveBtn.style.cursor = 'default';
+                    }
+                    statesContainer.appendChild(liveBtn);
+                }
+
                 mainDiv.appendChild(circle); mainDiv.appendChild(nameSpan); mainDiv.appendChild(statesContainer);
                 li.appendChild(mainDiv);
 
@@ -883,6 +1158,9 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
 bottomLeaveVoiceBtn.addEventListener('click', disconnectVoiceRoom);
 function disconnectVoiceRoom() {
     if (!currentVoiceRoom) return;
+
+    stopScreenSharing();
+    screenShareStreams = {};
 
     for (let id in voiceCalls) voiceCalls[id].close();
     voiceCalls = {};
@@ -1128,9 +1406,7 @@ socket.on('kicked-from-voice', () => {
 
 socket.on('kicked-from-server', () => {
     showCustomAlert("Sunucudan Atıldınız", "Yönetici tarafından sunucudan atıldınız!", () => {
-        localStorage.removeItem('username');
-        localStorage.removeItem('userId');
-        localStorage.removeItem('avatar');
+        clearSession();
         location.reload();
     });
 });
@@ -1235,3 +1511,131 @@ document.getElementById('view-pins-btn').addEventListener('click', () => {
 document.getElementById('close-pins-modal-btn').addEventListener('click', () => {
     document.getElementById('pinned-messages-modal').style.display = 'none';
 });
+
+socket.on('screen-share-requested', ({ requesterPeerId }) => {
+    if (localScreenStream) {
+        const call = peer.call(requesterPeerId, localScreenStream, { metadata: { type: 'screen-share' } });
+        screenShareCalls[requesterPeerId] = call;
+    }
+});
+
+// Screen Share Helper Functions
+function stopScreenSharing() {
+    if (localScreenStream) {
+        localScreenStream.getTracks().forEach(t => t.stop());
+        localScreenStream = null;
+    }
+    for (let pId in screenShareCalls) {
+        screenShareCalls[pId].close();
+    }
+    screenShareCalls = {};
+    socket.emit('stop-screen-share');
+    const bBtn = document.getElementById('bottom-share-screen');
+    if (bBtn) bBtn.classList.remove('strikethrough-icon');
+}
+
+function watchScreenShare(peerId, username) {
+    const modal = document.getElementById('screen-watch-modal');
+    const video = document.getElementById('screen-watch-video');
+    const title = document.getElementById('screen-watch-title').querySelector('span');
+    
+    title.textContent = `📺 ${username} adlı kişinin yayını izleniyor`;
+    modal.dataset.watchingPeerId = peerId;
+    
+    if (screenShareStreams[peerId]) {
+        video.srcObject = screenShareStreams[peerId];
+        modal.style.display = 'flex';
+    } else {
+        socket.emit('request-screen-share-stream', { targetPeerId: peerId, requesterPeerId: myPeerId });
+        showCustomAlert("Bağlantı Kuruluyor", "Yayın akışı talep edildi, bağlanıyor...", () => {
+            setTimeout(() => {
+                if (screenShareStreams[peerId]) {
+                    video.srcObject = screenShareStreams[peerId];
+                    modal.style.display = 'flex';
+                } else {
+                    showCustomAlert("Hata", "Yayın akışı alınamadı. Yayıncı yayını kapatmış olabilir.");
+                }
+            }, 1500);
+        });
+    }
+}
+
+function closeScreenWatchModal() {
+    const modal = document.getElementById('screen-watch-modal');
+    const video = document.getElementById('screen-watch-video');
+    video.srcObject = null;
+    modal.style.display = 'none';
+    delete modal.dataset.watchingPeerId;
+}
+
+// Bind close button
+const screenWatchCloseBtn = document.getElementById('screen-watch-close-btn');
+if (screenWatchCloseBtn) {
+    screenWatchCloseBtn.addEventListener('click', closeScreenWatchModal);
+}
+
+// Bind start/cancel settings buttons
+const bottomShareScreenBtn = document.getElementById('bottom-share-screen');
+const screenShareSettingsModal = document.getElementById('screen-share-settings-modal');
+const screenShareCancelBtn = document.getElementById('screen-share-cancel-btn');
+const screenShareStartBtn = document.getElementById('screen-share-start-btn');
+
+if (bottomShareScreenBtn) {
+    bottomShareScreenBtn.addEventListener('click', () => {
+        if (!currentVoiceRoom) {
+            showCustomAlert("Hata", "Ekran paylaşımı başlatmak için bir sesli kanala katılmalısınız.");
+            return;
+        }
+        if (localScreenStream) {
+            stopScreenSharing();
+        } else {
+            screenShareSettingsModal.style.display = 'flex';
+        }
+    });
+}
+
+if (screenShareCancelBtn) {
+    screenShareCancelBtn.addEventListener('click', () => {
+        screenShareSettingsModal.style.display = 'none';
+    });
+}
+
+if (screenShareStartBtn) {
+    screenShareStartBtn.addEventListener('click', async () => {
+        screenShareSettingsModal.style.display = 'none';
+        
+        const resolution = document.getElementById('share-resolution').value;
+        const fps = document.getElementById('share-fps').value;
+        
+        let width, height;
+        if (resolution === "360") { width = 640; height = 360; }
+        else if (resolution === "720") { width = 1280; height = 720; }
+        else { width = 1920; height = 1080; }
+        
+        const constraints = {
+            video: {
+                width: { max: width },
+                height: { max: height },
+                frameRate: { max: parseInt(fps) }
+            },
+            audio: true
+        };
+        
+        try {
+            localScreenStream = await navigator.mediaDevices.getDisplayMedia(constraints);
+            if (bottomShareScreenBtn) bottomShareScreenBtn.classList.add('strikethrough-icon');
+            socket.emit('start-screen-share');
+            
+            for (let peerId in voiceCalls) {
+                const call = peer.call(peerId, localScreenStream, { metadata: { type: 'screen-share' } });
+                screenShareCalls[peerId] = call;
+            }
+            
+            localScreenStream.getVideoTracks()[0].onended = () => {
+                stopScreenSharing();
+            };
+        } catch (err) {
+            showCustomAlert("Hata", "Ekran paylaşımı başlatılamadı.");
+        }
+    });
+}

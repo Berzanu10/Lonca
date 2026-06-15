@@ -1,0 +1,18 @@
+{
+  "user_7egsw4ake_1781557821539": {
+    "id": "user_7egsw4ake_1781557821539",
+    "username": "TestUser",
+    "email": "test@domain.com",
+    "password": "1f3dd2ea40aa7a6b98dbe151e40e4d42:aec64d0f13dca2d7aade060ebd71e4c87e9056441898d3a1beaa14832f24e0a77e856bbb52b7b3956d9f6289c076884ecefcf265ae03741d6a24ad24f6362c0a",
+    "avatar": "",
+    "isAdmin": false
+  },
+  "user_g_ghk1x9tzu_1781557986493": {
+    "id": "user_g_ghk1x9tzu_1781557986493",
+    "username": "Googleuser",
+    "email": "googleuser@domain.com",
+    "googleId": "mock_google_googleuser@domain.com",
+    "avatar": "https://api.dicebear.com/7.x/identicon/svg?seed=googleuser",
+    "isAdmin": false
+  }
+}

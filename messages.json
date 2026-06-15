@@ -1,5 +1,13 @@
 {
-  "genel": [],
+  "genel": [
+    {
+      "id": "msg_1781557079013_bb25o",
+      "sender": "Berzan baba",
+      "text": "Berzan baba yapıyor bu sporu",
+      "timestamp": 1781557079013,
+      "pinned": false
+    }
+  ],
   "oyun": [],
   "muzik": [],
   "koordinatlar": [
