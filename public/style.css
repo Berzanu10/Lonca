@@ -608,3 +608,33 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
   box-shadow: none !important;
 }
 
+/* Modal Kapatma Çarpı Butonu */
+.modal-close-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background-color: rgba(0, 0, 0, 0.4);
+  color: #dcddde;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.15rem;
+  font-weight: 500;
+  z-index: 10;
+  line-height: 1;
+  padding-bottom: 2px;
+  transition: background-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+.modal-close-btn:hover {
+  background-color: rgba(0, 0, 0, 0.7);
+  color: #fff;
+}
+.modal-close-btn:active {
+  transform: scale(0.95);
+}
+

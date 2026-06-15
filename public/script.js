@@ -290,8 +290,9 @@ if (modalAvatarPreview && avatarFileInput) {
     });
 }
 
-if (profileCancelBtn) {
-    profileCancelBtn.addEventListener('click', () => {
+const profileCloseBtn = document.getElementById('profile-close-btn');
+if (profileCloseBtn) {
+    profileCloseBtn.addEventListener('click', () => {
         profileModal.style.display = 'none';
         if (modalAvatarPreview) delete modalAvatarPreview.dataset.tempAvatar;
     });
