@@ -842,19 +842,56 @@ function applyHardwareStates() {
 socket.on('global-users', (usersObj) => {
     allUsersList = usersObj;
     usersList.innerHTML = '';
-    const ips = Object.keys(allUsersList).sort((a, b) => {
-        if (allUsersList[a].isOnline && !allUsersList[b].isOnline) return -1;
-        if (!allUsersList[a].isOnline && allUsersList[b].isOnline) return 1;
-        return 0;
+
+    const sortedIds = Object.keys(allUsersList).sort((a, b) => {
+        const uA = allUsersList[a];
+        const uB = allUsersList[b];
+        // Önce online olanlar, sonra offline; her ikisi içinde admin önce
+        if (uA.isOnline && !uB.isOnline) return -1;
+        if (!uA.isOnline && uB.isOnline) return 1;
+        if (uA.isAdmin && !uB.isAdmin) return -1;
+        if (!uA.isAdmin && uB.isAdmin) return 1;
+        return (uA.username || '').localeCompare(uB.username || '');
     });
-    for (let ip of ips) {
-        const u = allUsersList[ip];
+
+    // Online / Offline bölüm başlıkları
+    let onlineHeaderAdded = false;
+    let offlineHeaderAdded = false;
+
+    for (let uid of sortedIds) {
+        const u = allUsersList[uid];
+        const isMe = u.peerId === myPeerId;
+
+        // Bölüm başlığı
+        if (u.isOnline && !onlineHeaderAdded) {
+            const hdr = document.createElement('li');
+            hdr.style.cssText = 'color:#72767d;font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;padding:12px 8px 4px;list-style:none;';
+            hdr.textContent = 'Çevrimiçi';
+            usersList.appendChild(hdr);
+            onlineHeaderAdded = true;
+        }
+        if (!u.isOnline && !offlineHeaderAdded) {
+            const hdr = document.createElement('li');
+            hdr.style.cssText = 'color:#72767d;font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;padding:12px 8px 4px;list-style:none;';
+            hdr.textContent = 'Çevrimdışı';
+            usersList.appendChild(hdr);
+            offlineHeaderAdded = true;
+        }
 
         const li = document.createElement('li');
-        li.style.opacity = u.isOnline ? '1' : '0.4';
+        li.style.cssText = `opacity:${u.isOnline ? '1' : '0.45'}; display:flex; align-items:center; justify-content:space-between; padding:3px 4px; border-radius:4px; gap:4px;`;
+        li.style.transition = 'background 0.1s';
+        li.addEventListener('mouseenter', () => { if (!u.isOnline) li.style.background = 'rgba(255,255,255,0.03)'; else li.style.background = 'rgba(255,255,255,0.05)'; });
+        li.addEventListener('mouseleave', () => { li.style.background = 'transparent'; });
 
+        // Sol: avatar + isim + online nokta
         const infoDiv = document.createElement('div');
         infoDiv.className = u.isOnline ? 'right-user-info online' : 'right-user-info';
+        infoDiv.style.cssText = 'display:flex;align-items:center;gap:0;flex:1;min-width:0;';
+
+        // Avatar wrapper (relative, for status dot)
+        const avatarWrapper = document.createElement('div');
+        avatarWrapper.style.cssText = 'position:relative;flex-shrink:0;margin-right:8px;';
 
         const avatar = document.createElement('div');
         avatar.className = 'right-panel-avatar';
@@ -866,64 +903,106 @@ socket.on('global-users', (usersObj) => {
         } else {
             avatar.style.backgroundImage = '';
             avatar.style.color = '';
-            avatar.textContent = u.username.charAt(0).toUpperCase();
+            avatar.textContent = (u.username || '?').charAt(0).toUpperCase();
         }
-        infoDiv.appendChild(avatar);
+        avatarWrapper.appendChild(avatar);
 
+        // Status dot
+        const statusDot = document.createElement('div');
+        statusDot.style.cssText = `
+            position:absolute; bottom:-1px; right:-1px;
+            width:10px; height:10px; border-radius:50%;
+            background:${u.isOnline ? '#43b581' : '#747f8d'};
+            border:2px solid #2f3136;
+        `;
+        avatarWrapper.appendChild(statusDot);
+        infoDiv.appendChild(avatarWrapper);
+
+        // Name + badges
         const nameSpan = document.createElement('span');
-        nameSpan.style.display = 'flex';
-        nameSpan.style.alignItems = 'center';
-        nameSpan.style.gap = '6px';
+        nameSpan.style.cssText = 'display:flex;align-items:center;gap:5px;min-width:0;flex:1;';
 
         const nameText = document.createElement('span');
-        nameText.textContent = u.username;
+        nameText.style.cssText = 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:0.88rem;';
+        nameText.textContent = isMe ? u.username + ' (Sen)' : u.username;
+        if (isMe) { nameText.style.color = '#43b581'; nameText.style.fontWeight = 'bold'; }
 
-        if (u.peerId === myPeerId) {
-            nameText.textContent += " (Sen)";
-            nameText.style.color = "#43b581";
-            nameText.style.fontWeight = "bold";
-        }
         nameSpan.appendChild(nameText);
 
         if (u.isAdmin) {
-            const crownSpan = document.createElement('span');
-            crownSpan.style.display = 'inline-flex';
-            crownSpan.style.alignItems = 'center';
-            crownSpan.title = 'Sunucu Sahibi / Yönetici';
-            crownSpan.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="#FEE75C"><path d="M2 22h20V2L15 9l-3-6-3 6L2 2z"/></svg>`;
-            nameSpan.appendChild(crownSpan);
+            const crown = document.createElement('span');
+            crown.title = 'Yönetici';
+            crown.style.flexShrink = '0';
+            crown.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="#FEE75C"><path d="M2 22h20V2L15 9l-3-6-3 6L2 2z"/></svg>`;
+            nameSpan.appendChild(crown);
         }
 
         infoDiv.appendChild(nameSpan);
-
-        const callBtn = document.createElement('button');
-        if (u.isOnline && u.peerId !== myPeerId) {
-            callBtn.innerHTML = "Ara";
-            callBtn.onclick = () => initiatePrivateCall(u.peerId, u.username);
-        } else {
-            callBtn.style.display = 'none';
-        }
-
-        let kickBtn = null;
-        if (amIAdmin && u.peerId !== myPeerId && u.isOnline) {
-            kickBtn = document.createElement('button');
-            kickBtn.innerHTML = "At";
-            kickBtn.style.backgroundColor = "var(--danger-color)";
-            kickBtn.style.marginLeft = "4px";
-            kickBtn.onclick = (e) => {
-                e.stopPropagation();
-                showCustomConfirm("Sunucudan At", `${u.username} sunucudan atılsın mı?`, true, () => {
-                    socket.emit('kick-from-server', u.userId);
-                });
-            };
-        }
-
         li.appendChild(infoDiv);
-        if (u.isOnline && u.peerId !== myPeerId) li.appendChild(callBtn);
-        if (kickBtn) li.appendChild(kickBtn);
+
+        // Sağ: action butonları
+        if (!isMe) {
+            const actionsDiv = document.createElement('div');
+            actionsDiv.style.cssText = 'display:flex;gap:3px;flex-shrink:0;';
+
+            // Ara (sadece online)
+            if (u.isOnline) {
+                const callBtn = document.createElement('button');
+                callBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1-9.4 0-17-7.6-17-17 0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/></svg>`;
+                callBtn.title = 'Özel Çağrı';
+                callBtn.style.cssText = 'background:rgba(67,181,129,0.15);border:none;color:#43b581;width:26px;height:26px;border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.1s;';
+                callBtn.addEventListener('mouseenter', () => callBtn.style.background = 'rgba(67,181,129,0.3)');
+                callBtn.addEventListener('mouseleave', () => callBtn.style.background = 'rgba(67,181,129,0.15)');
+                callBtn.onclick = () => initiatePrivateCall(u.peerId, u.username);
+                actionsDiv.appendChild(callBtn);
+            }
+
+            if (amIAdmin) {
+                // Sunucudan At (geçici kick, sadece online)
+                if (u.isOnline) {
+                    const kickBtn = document.createElement('button');
+                    kickBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M13 3h-2v10h2V3zm4.83 2.17l-1.42 1.42C17.99 7.86 19 9.81 19 12c0 3.87-3.13 7-7 7s-7-3.13-7-7c0-2.19 1.01-4.14 2.58-5.42L6.17 5.17C4.23 6.82 3 9.26 3 12c0 4.97 4.03 9 9 9s9-4.03 9-9c0-2.74-1.23-5.18-3.17-6.83z"/></svg>`;
+                    kickBtn.title = 'Sunucudan At (Geçici)';
+                    kickBtn.style.cssText = 'background:rgba(237,66,69,0.15);border:none;color:#ed4245;width:26px;height:26px;border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.1s;';
+                    kickBtn.addEventListener('mouseenter', () => kickBtn.style.background = 'rgba(237,66,69,0.3)');
+                    kickBtn.addEventListener('mouseleave', () => kickBtn.style.background = 'rgba(237,66,69,0.15)');
+                    kickBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        showCustomConfirm("Sunucudan At", `${u.username} sunucudan atılsın mı? (Tekrar giriş yapabilir)`, true, () => {
+                            socket.emit('kick-from-server', u.userId);
+                        });
+                    };
+                    actionsDiv.appendChild(kickBtn);
+                }
+
+                // Kalıcı Kaldır (her zaman görünür, admin için)
+                if (!u.isAdmin) {
+                    const removeBtn = document.createElement('button');
+                    removeBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>`;
+                    removeBtn.title = 'Sunucudan Kalıcı Kaldır';
+                    removeBtn.style.cssText = 'background:rgba(237,66,69,0.08);border:1px solid rgba(237,66,69,0.3);color:#c04040;width:26px;height:26px;border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.1s;';
+                    removeBtn.addEventListener('mouseenter', () => { removeBtn.style.background = 'rgba(237,66,69,0.25)'; removeBtn.style.color = '#ed4245'; });
+                    removeBtn.addEventListener('mouseleave', () => { removeBtn.style.background = 'rgba(237,66,69,0.08)'; removeBtn.style.color = '#c04040'; });
+                    removeBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        showCustomConfirm(
+                            "Kalıcı Kaldır",
+                            `${u.username} kullanıcısı sunucudan kalıcı olarak kaldırılsın mı? Bu işlem geri alınamaz!`,
+                            true,
+                            () => { socket.emit('remove-user', u.userId); }
+                        );
+                    };
+                    actionsDiv.appendChild(removeBtn);
+                }
+            }
+
+            if (actionsDiv.children.length > 0) li.appendChild(actionsDiv);
+        }
+
         usersList.appendChild(li);
     }
 });
+
 
 // -----------------------------------------
 // Metin Kanalları ve Sohbet Geçmişi
