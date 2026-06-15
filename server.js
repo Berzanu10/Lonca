@@ -66,8 +66,18 @@ try {
    if (fs.existsSync(MESSAGES_FILE)) {
       const fileContent = fs.readFileSync(MESSAGES_FILE, 'utf8');
       messageHistory = JSON.parse(fileContent);
+      let dirty = false;
       for (let r in textRooms) {
          if (!messageHistory[r]) messageHistory[r] = [];
+         messageHistory[r].forEach(msg => {
+            if (!msg.id) {
+               msg.id = 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+               dirty = true;
+            }
+         });
+      }
+      if (dirty) {
+         saveMessages();
       }
    } else {
       for (let r in textRooms) {
@@ -264,6 +274,15 @@ io.on('connection', (socket) => {
       if (targetSocket) {
          targetSocket.emit('kicked-from-server');
          targetSocket.disconnect(true);
+      }
+   });
+
+   socket.on('clear-channel-messages', (roomId) => {
+      if (!socket.isAdmin) return;
+      if (messageHistory[roomId]) {
+         messageHistory[roomId] = [];
+         saveMessages();
+         io.to('text-' + roomId).emit('channel-messages-cleared', roomId);
       }
    });
 

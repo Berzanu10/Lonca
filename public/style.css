@@ -145,7 +145,7 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
 
 /* ORTA BÖLÜM */
 .main-content { flex-grow: 1; display: flex; flex-direction: column; background-color: var(--chat-bg); }
-.room-header { padding: 1.2rem 1.5rem; border-bottom: 1px solid var(--panel-color); box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+.room-header { padding: 1.2rem 1.5rem; border-bottom: 1px solid var(--panel-color); box-shadow: 0 1px 2px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center; }
 .chat-section { flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; }
 #messages { flex-grow: 1; padding: 1.5rem 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
 .message { padding: 4px 24px; display: flex; flex-direction: row; font-size: 1rem; line-height: 1.4; }
@@ -539,3 +539,72 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
   color: #fff;
   font-weight: 500;
 }
+
+/* Sohbeti Temizle Butonu */
+.clear-chat-btn {
+  background-color: var(--danger-color);
+  color: white;
+  border: none;
+  padding: 6px 16px;
+  border-radius: 20px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.85rem;
+  transition: background-color 0.15s ease, transform 0.15s ease;
+}
+.clear-chat-btn:hover {
+  background-color: #c93b3e;
+}
+.clear-chat-btn:active {
+  transform: scale(0.95);
+}
+
+/* Custom Dialog Modals (Discord Theme) */
+.confirm-modal-content {
+  width: 440px;
+  background: #313338;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  animation: fadein 0.15s ease-out;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+.confirm-modal-content h3 {
+  padding: 20px 20px 10px 20px;
+  color: #fff;
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0;
+}
+.confirm-modal-content p {
+  padding: 0 20px 20px 20px;
+  color: #dbdee1;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  margin: 0;
+}
+.confirm-modal-actions {
+  background-color: #2b2d31;
+  padding: 16px 20px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+#custom-prompt-modal .profile-input-wrapper {
+  margin-left: 20px;
+  margin-right: 20px;
+}
+#custom-prompt-input {
+  flex-grow: 1;
+  background: transparent !important;
+  border: none !important;
+  color: #fff !important;
+  padding: 10px 0;
+  font-size: 0.95rem;
+  outline: none !important;
+  box-shadow: none !important;
+}
+

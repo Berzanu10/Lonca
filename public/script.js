@@ -39,6 +39,114 @@ const textChannels = document.querySelectorAll('.text-channel');
 const voiceChannels = document.querySelectorAll('.voice-channel');
 const audioContainer = document.getElementById('audio-container');
 
+// -----------------------------------------
+// CUSTOM DIALOG & MODAL SYSTEM (Discord-like)
+// -----------------------------------------
+function showCustomConfirm(title, message, isDanger, onOk, onCancel) {
+    const modal = document.getElementById('custom-dialog-modal');
+    const titleEl = document.getElementById('custom-dialog-title');
+    const messageEl = document.getElementById('custom-dialog-message');
+    const okBtn = document.getElementById('custom-dialog-ok-btn');
+    const cancelBtn = document.getElementById('custom-dialog-cancel-btn');
+    
+    titleEl.textContent = title;
+    messageEl.textContent = message;
+    
+    cancelBtn.style.display = 'inline-block';
+    
+    if (isDanger) {
+        okBtn.style.backgroundColor = '#ed4245';
+        okBtn.textContent = 'Evet, Devam Et';
+    } else {
+        okBtn.style.backgroundColor = '#5865F2';
+        okBtn.textContent = 'Evet';
+    }
+    
+    modal.style.display = 'flex';
+    
+    const cleanUp = () => {
+        modal.style.display = 'none';
+        okBtn.onclick = null;
+        cancelBtn.onclick = null;
+    };
+    
+    okBtn.onclick = () => {
+        cleanUp();
+        if (onOk) onOk();
+    };
+    
+    cancelBtn.onclick = () => {
+        cleanUp();
+        if (onCancel) onCancel();
+    };
+}
+
+function showCustomAlert(title, message, onOk) {
+    const modal = document.getElementById('custom-dialog-modal');
+    const titleEl = document.getElementById('custom-dialog-title');
+    const messageEl = document.getElementById('custom-dialog-message');
+    const okBtn = document.getElementById('custom-dialog-ok-btn');
+    const cancelBtn = document.getElementById('custom-dialog-cancel-btn');
+    
+    titleEl.textContent = title;
+    messageEl.textContent = message;
+    
+    cancelBtn.style.display = 'none';
+    okBtn.style.backgroundColor = '#5865F2';
+    okBtn.textContent = 'Tamam';
+    
+    modal.style.display = 'flex';
+    
+    const cleanUp = () => {
+        modal.style.display = 'none';
+        okBtn.onclick = null;
+        cancelBtn.onclick = null;
+    };
+    
+    okBtn.onclick = () => {
+        cleanUp();
+        if (onOk) onOk();
+    };
+}
+
+function showCustomPrompt(title, placeholder, onOk, onCancel) {
+    const modal = document.getElementById('custom-prompt-modal');
+    const titleEl = document.getElementById('custom-prompt-title');
+    const inputEl = document.getElementById('custom-prompt-input');
+    const okBtn = document.getElementById('custom-prompt-ok-btn');
+    const cancelBtn = document.getElementById('custom-prompt-cancel-btn');
+    
+    titleEl.textContent = title;
+    inputEl.placeholder = placeholder;
+    inputEl.value = '';
+    
+    modal.style.display = 'flex';
+    inputEl.focus();
+    
+    const cleanUp = () => {
+        modal.style.display = 'none';
+        okBtn.onclick = null;
+        cancelBtn.onclick = null;
+    };
+    
+    okBtn.onclick = () => {
+        const val = inputEl.value.trim();
+        cleanUp();
+        if (onOk) onOk(val);
+    };
+    
+    cancelBtn.onclick = () => {
+        cleanUp();
+        if (onCancel) onCancel();
+    };
+    
+    inputEl.onkeydown = (e) => {
+        if (e.key === 'Enter') {
+            okBtn.click();
+        }
+    };
+}
+
 const toggleMicBtn = document.getElementById('toggle-mic-btn');
 const toggleDeafBtn = document.getElementById('toggle-deaf-btn');
 const bottomLeaveVoiceBtn = document.getElementById('bottom-leave-voice');
@@ -87,7 +195,7 @@ joinBtn.addEventListener('click', () => {
         loginScreen.style.display = 'none';
         appContainer.style.display = 'flex';
         initializePeer();
-    } else alert("Takma ad boş olamaz.");
+    } else showCustomAlert("Hata", "Takma ad boş olamaz.");
 });
 
 function openProfileModal() {
@@ -193,7 +301,7 @@ if (profileSaveBtn) {
     profileSaveBtn.addEventListener('click', () => {
         const newName = profileUsernameInput.value.trim();
         if (!newName) {
-            alert("Kullanıcı adı boş olamaz.");
+            showCustomAlert("Hata", "Kullanıcı adı boş olamaz.");
             return;
         }
         localStorage.setItem('username', newName);
@@ -250,7 +358,7 @@ function initializePeer() {
         let callerName = "Biri";
         for (let ip in allUsersList) if (allUsersList[ip].peerId === call.peer) callerName = allUsersList[ip].username;
 
-        if (window.confirm(`${callerName} sizi ÖZEL görüntülü arıyor! Kabul ediyor musunuz?`)) {
+        showCustomConfirm("Özel Arama", `${callerName} sizi ÖZEL görüntülü arıyor! Kabul ediyor musunuz?`, false, async () => {
             try {
                 if (!localVideoStream) localVideoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
                 call.answer(localVideoStream);
@@ -258,8 +366,8 @@ function initializePeer() {
                 openVideoModal(); addVideoStream(localVideoStream, 'local', 'Sen');
                 call.on('stream', userStream => addVideoStream(userStream, call.peer, callerName));
                 call.on('close', () => endPrivateCall());
-            } catch (err) { alert("Kameraya erişim sağlanamadı."); }
-        }
+            } catch (err) { showCustomAlert("Hata", "Kameraya erişim sağlanamadı."); }
+        });
     });
 }
 
@@ -332,12 +440,27 @@ socket.on('global-users', (usersObj) => {
         infoDiv.appendChild(avatar);
 
         const nameSpan = document.createElement('span');
-        nameSpan.textContent = u.username;
+        nameSpan.style.display = 'flex';
+        nameSpan.style.alignItems = 'center';
+        nameSpan.style.gap = '6px';
+
+        const nameText = document.createElement('span');
+        nameText.textContent = u.username;
 
         if (u.peerId === myPeerId) {
-            nameSpan.textContent += " (Sen)";
-            nameSpan.style.color = "#43b581";
-            nameSpan.style.fontWeight = "bold";
+            nameText.textContent += " (Sen)";
+            nameText.style.color = "#43b581";
+            nameText.style.fontWeight = "bold";
+        }
+        nameSpan.appendChild(nameText);
+
+        if (u.isAdmin) {
+            const crownSpan = document.createElement('span');
+            crownSpan.style.display = 'inline-flex';
+            crownSpan.style.alignItems = 'center';
+            crownSpan.title = 'Sunucu Sahibi / Yönetici';
+            crownSpan.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="#FEE75C"><path d="M2 22h20V2L15 9l-3-6-3 6L2 2z"/></svg>`;
+            nameSpan.appendChild(crownSpan);
         }
 
         infoDiv.appendChild(nameSpan);
@@ -358,9 +481,9 @@ socket.on('global-users', (usersObj) => {
             kickBtn.style.marginLeft = "4px";
             kickBtn.onclick = (e) => {
                 e.stopPropagation();
-                if (confirm(`${u.username} sunucudan atılsın mı?`)) {
+                showCustomConfirm("Sunucudan At", `${u.username} sunucudan atılsın mı?`, true, () => {
                     socket.emit('kick-from-server', u.userId);
-                }
+                });
             };
         }
 
@@ -432,7 +555,7 @@ async function connectVoiceRoom(room) {
         monitorSpeech(localAudioStream, myPeerId);
         applyHardwareStates();
     } catch (e) {
-        alert("Mikrofon izni olmadan sesli kanalla bağlantı kurulamaz."); return;
+        showCustomAlert("Bağlantı Hatası", "Mikrofon izni olmadan sesli kanalla bağlantı kurulamaz."); return;
     }
 
     disconnectVoiceRoom();
@@ -507,23 +630,22 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
                 dIcon.innerHTML = headSVG;
                 statesContainer.appendChild(dIcon);
 
-                 // If admin, show a kick button next to the states
-                 if (amIAdmin && id !== myPeerId) {
-                     const kickVoiceBtn = document.createElement('button');
-                     kickVoiceBtn.className = 'kick-voice-btn';
-                     kickVoiceBtn.title = "Sesten At";
-                     kickVoiceBtn.innerHTML = `×`;
-                     kickVoiceBtn.onclick = (e) => {
-                         e.stopPropagation();
-                         if (confirm(`${userDataObj.username || "Kullanıcı"} adlı kişiyi sesten atmak istediğinize emin misiniz?`)) {
-                             socket.emit('kick-from-voice', id);
-                         }
-                     };
-                     statesContainer.appendChild(kickVoiceBtn);
-                 }
+                if (amIAdmin && id !== myPeerId) {
+                    const kickVoiceBtn = document.createElement('button');
+                    kickVoiceBtn.className = 'kick-voice-btn';
+                    kickVoiceBtn.title = "Sesten At";
+                    kickVoiceBtn.innerHTML = `×`;
+                    kickVoiceBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        showCustomConfirm("Sesten At", `${userDataObj.username || "Kullanıcı"} adlı kişiyi sesten atmak istediğinize emin misiniz?`, true, () => {
+                            socket.emit('kick-from-voice', id);
+                        });
+                    };
+                    statesContainer.appendChild(kickVoiceBtn);
+                }
 
-                 mainDiv.appendChild(circle); mainDiv.appendChild(nameSpan); mainDiv.appendChild(statesContainer);
-                 li.appendChild(mainDiv);
+                mainDiv.appendChild(circle); mainDiv.appendChild(nameSpan); mainDiv.appendChild(statesContainer);
+                li.appendChild(mainDiv);
 
                 if (id !== myPeerId && currentVoiceRoom === r) {
                     const volDiv = document.createElement('div');
@@ -669,6 +791,8 @@ socket.on('admin-status', (isAdmin) => {
     amIAdmin = isAdmin;
     if (addTextBtn) addTextBtn.style.display = isAdmin ? 'block' : 'none';
     if (addVoiceBtn) addVoiceBtn.style.display = isAdmin ? 'block' : 'none';
+    const clearChatBtn = document.getElementById('clear-chat-btn');
+    if (clearChatBtn) clearChatBtn.style.display = isAdmin ? 'block' : 'none';
 });
 
 socket.on('channels-list', ({ text, voice }) => {
@@ -745,40 +869,42 @@ socket.on('channels-list', ({ text, voice }) => {
 });
 
 window.deleteChannel = function(name, type) {
-    if (confirm(`"${name}" kanalını silmek istediğinize emin misiniz?`)) {
+    showCustomConfirm("Kanalı Sil", `"${name}" kanalını silmek istediğinize emin misiniz?`, true, () => {
         socket.emit('delete-channel', { name, type });
-    }
+    });
 };
 
 window.deleteMessage = function(msgId) {
-    if (confirm("Bu mesajı silmek istediğinize emin misiniz?")) {
+    showCustomConfirm("Mesajı Sil", "Bu mesajı silmek istediğinize emin misiniz?", true, () => {
         socket.emit('delete-message', msgId);
-    }
+    });
 };
 
 if (addTextBtn) {
     addTextBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const name = prompt("Yeni metin kanalı adını girin:");
-        if (name) {
-            const formatted = name.trim().toLowerCase().replace(/\s+/g, '-');
-            if (formatted) {
-                socket.emit('create-channel', { name: formatted, type: 'text' });
+        showCustomPrompt("Yeni Metin Kanalı", "Kanal adını girin...", (name) => {
+            if (name) {
+                const formatted = name.trim().toLowerCase().replace(/\s+/g, '-');
+                if (formatted) {
+                    socket.emit('create-channel', { name: formatted, type: 'text' });
+                }
             }
-        }
+        });
     });
 }
 
 if (addVoiceBtn) {
     addVoiceBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const name = prompt("Yeni ses kanalı adını girin:");
-        if (name) {
-            const formatted = name.trim();
-            if (formatted) {
-                socket.emit('create-channel', { name: formatted, type: 'voice' });
+        showCustomPrompt("Yeni Ses Kanalı", "Kanal adını girin...", (name) => {
+            if (name) {
+                const formatted = name.trim();
+                if (formatted) {
+                    socket.emit('create-channel', { name: formatted, type: 'voice' });
+                }
             }
-        }
+        });
     });
 }
 
@@ -790,14 +916,32 @@ socket.on('message-deleted', (msgId) => {
 });
 
 socket.on('kicked-from-voice', () => {
-    alert("Bir yönetici tarafından sesli kanaldan atıldınız.");
-    disconnectVoiceRoom();
+    showCustomAlert("Sesten Atıldınız", "Bir yönetici tarafından sesli kanaldan atıldınız.", () => {
+        disconnectVoiceRoom();
+    });
 });
 
 socket.on('kicked-from-server', () => {
-    alert("Yönetici tarafından sunucudan atıldınız!");
-    localStorage.removeItem('username');
-    localStorage.removeItem('userId');
-    localStorage.removeItem('avatar');
-    location.reload();
+    showCustomAlert("Sunucudan Atıldınız", "Yönetici tarafından sunucudan atıldınız!", () => {
+        localStorage.removeItem('username');
+        localStorage.removeItem('userId');
+        localStorage.removeItem('avatar');
+        location.reload();
+    });
+});
+
+// Sohbeti Temizle
+const clearChatBtn = document.getElementById('clear-chat-btn');
+if (clearChatBtn) {
+    clearChatBtn.addEventListener('click', () => {
+        showCustomConfirm("Sohbeti Temizle", `"${currentTextRoom}" kanalındaki tüm mesajları silmek istediğinize emin misiniz?`, true, () => {
+            socket.emit('clear-channel-messages', currentTextRoom);
+        });
+    });
+}
+
+socket.on('channel-messages-cleared', (roomId) => {
+    if (roomId === currentTextRoom) {
+        messages.innerHTML = '';
+    }
 });
