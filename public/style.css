@@ -393,16 +393,102 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
   text-decoration: underline;
 }
 
-.logout-btn {
+/* ----------------------------------
+   DİNAMİK KANALLAR VE ADMİN TUŞLARI
+-------------------------------------*/
+.add-channel-btn {
   background: transparent;
-  color: var(--danger-color);
   border: none;
-  padding: 8px 0;
-  font-weight: 500;
-  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-size: 1.25rem;
+  font-weight: bold;
   cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  transition: color 0.15s ease;
+}
+.add-channel-btn:hover {
+  color: #fff;
 }
 
-.logout-btn:hover {
-  text-decoration: underline;
+.delete-channel-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  cursor: pointer;
+  display: none;
+  line-height: 1;
+  padding: 0 4px;
+}
+.channel:hover .delete-channel-btn {
+  display: block;
+}
+.delete-channel-btn:hover {
+  color: var(--danger-color);
+}
+
+.kick-voice-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  font-weight: bold;
+  cursor: pointer;
+  margin-left: 6px;
+  line-height: 1;
+  transition: color 0.1s ease;
+}
+.kick-voice-btn:hover {
+  color: var(--danger-color);
+}
+
+.delete-msg-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+}
+.message:hover .delete-msg-btn {
+  opacity: 1;
+}
+.delete-msg-btn:hover {
+  color: var(--danger-color);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* ----------------------------------
+   CİLALANMIŞ PROFİL INPUTLARI
+-------------------------------------*/
+.profile-input-wrapper {
+  display: flex;
+  align-items: center;
+  background-color: #202225 !important;
+  border-radius: 4px;
+  padding: 0 12px;
+  border: 1px solid #101112;
+  margin-top: 6px;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.5);
+  transition: border-color 0.15s ease;
+}
+.profile-input-wrapper:focus-within {
+  border-color: var(--highlight-color);
+}
+.profile-username-input, 
+#profile-admin-key {
+  flex-grow: 1;
+  background: transparent !important;
+  border: none !important;
+  color: #fff !important;
+  padding: 10px 0;
+  font-size: 0.95rem;
+  outline: none !important;
+  box-shadow: none !important;
 }

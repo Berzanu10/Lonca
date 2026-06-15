@@ -23,44 +23,22 @@
       
       <div class="sidebar-scrollable">
           <div class="channel-section">
-            <h3>Metin Kanalları</h3>
+            <h3 style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.5rem; margin-top: 1rem;">
+               <span>Metin Kanalları</span>
+               <button id="add-text-channel-btn" class="add-channel-btn" style="display:none;" type="button" title="Yeni Metin Kanalı">+</button>
+            </h3>
             <ul id="text-channels-list">
-              <li class="channel text-channel active" data-room="genel">
-                <svg width="20" height="24" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 6px;"><path d="M16 4h-2l-1 5h-5l1-5h-2l-1 5h-4v2h3.5l-1 5h-3.5v2h3.5l-1 5h2l1-5h5l-1 5h2l1-5h4v-2h-3.5l1-5h3.5v-2h-3.5l1-5zm-3 12h-5l1-5h5l-1 5z"/></svg> genel
-              </li>
-              <li class="channel text-channel" data-room="oyun">
-                <svg width="20" height="24" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 6px;"><path d="M16 4h-2l-1 5h-5l1-5h-2l-1 5h-4v2h3.5l-1 5h-3.5v2h3.5l-1 5h2l1-5h5l-1 5h2l1-5h4v-2h-3.5l1-5h3.5v-2h-3.5l1-5zm-3 12h-5l1-5h5l-1 5z"/></svg> oyun
-              </li>
-              <li class="channel text-channel" data-room="muzik">
-                <svg width="20" height="24" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 6px;"><path d="M16 4h-2l-1 5h-5l1-5h-2l-1 5h-4v2h3.5l-1 5h-3.5v2h3.5l-1 5h2l1-5h5l-1 5h2l1-5h4v-2h-3.5l1-5h3.5v-2h-3.5l1-5zm-3 12h-5l1-5h5l-1 5z"/></svg> müzik
-              </li>
+               <!-- Dinamik olarak yüklenecek -->
             </ul>
           </div>
 
           <div class="channel-section" style="margin-top: 1.5rem;">
-            <h3>Sesli Sohbetler</h3>
+            <h3 style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.5rem; margin-top: 1rem;">
+               <span>Sesli Sohbetler</span>
+               <button id="add-voice-channel-btn" class="add-channel-btn" style="display:none;" type="button" title="Yeni Ses Kanalı">+</button>
+            </h3>
             <ul id="voice-channels-list">
-              <li class="channel voice-channel" data-room="sohbet">
-                 <div class="voice-channel-header">
-                     <svg width="20" height="24" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 6px; flex-shrink: 0;"><path d="M14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/><path d="M3 9v6h4l5 5V4L7 9H3z"/></svg>
-                     Sohbet Odası
-                 </div>
-                 <ul class="voice-users" id="voice-users-sohbet"></ul>
-              </li>
-              <li class="channel voice-channel" data-room="oyun">
-                 <div class="voice-channel-header">
-                     <svg width="20" height="24" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 6px; flex-shrink: 0;"><path d="M14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/><path d="M3 9v6h4l5 5V4L7 9H3z"/></svg>
-                     Oyun Ekibi
-                 </div>
-                 <ul class="voice-users" id="voice-users-oyun"></ul>
-              </li>
-              <li class="channel voice-channel" data-room="sessiz">
-                 <div class="voice-channel-header">
-                     <svg width="20" height="24" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 6px; flex-shrink: 0;"><path d="M14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/><path d="M3 9v6h4l5 5V4L7 9H3z"/></svg>
-                     Sessiz Çalışma
-                 </div>
-                 <ul class="voice-users" id="voice-users-sessiz"></ul>
-              </li>
+               <!-- Dinamik olarak yüklenecek -->
             </ul>
           </div>
       </div>
@@ -158,6 +136,12 @@
               <input type="text" id="profile-username-input" autocomplete="off" placeholder="Takma adınızı yazın...">
               <span class="profile-tag-suffix">#1000</span>
            </div>
+
+           <label for="profile-admin-key" style="margin-top: 10px;">Yönetici Anahtarı (Gizli)</label>
+           <div class="profile-input-wrapper">
+              <input type="password" id="profile-admin-key" autocomplete="off" placeholder="Yönetici anahtarını girin...">
+           </div>
+
            <div class="profile-actions" style="justify-content: flex-end;">
               <div class="profile-right-actions">
                  <button id="profile-cancel-btn" class="cancel-btn" type="button">İptal</button>
