@@ -1,6 +1,12 @@
 const socket = io('/');
 let peer, myPeerId, myUsername;
 
+let myUserId = localStorage.getItem('userId');
+if (!myUserId) {
+    myUserId = 'user_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+    localStorage.setItem('userId', myUserId);
+}
+
 let currentTextRoom = 'genel';
 let currentVoiceRoom = null;
 
@@ -74,6 +80,7 @@ if (settingsBtn) {
             location.reload();
         } else {
             localStorage.removeItem('username');
+            localStorage.removeItem('userId'); // Remove userId to start fresh next time
             location.reload();
         }
     });
@@ -84,7 +91,7 @@ function initializePeer() {
 
     peer.on('open', id => {
         myPeerId = id;
-        socket.emit('register', myPeerId, myUsername);
+        socket.emit('register', myPeerId, myUsername, myUserId);
         joinTextRoom(currentTextRoom);
     });
 

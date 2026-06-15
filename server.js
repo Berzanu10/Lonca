@@ -33,14 +33,17 @@ const allTimeUsers = {};
 io.on('connection', (socket) => {
    socket.voiceState = { mic: true, deaf: false }; // Kullanıcının varsayılan donanım durumu
 
-   socket.on('register', (peerId, username) => {
+   socket.on('register', (peerId, username, userId) => {
+      const uId = userId || peerId;
       socket.peerId = peerId;
       socket.username = username;
+      socket.userId = uId;
 
-      allTimeUsers[peerId] = {
+      allTimeUsers[uId] = {
          username: username,
          isOnline: true,
-         peerId: peerId
+         peerId: peerId,
+         userId: uId
       };
 
       io.emit('global-users', allTimeUsers);
@@ -112,8 +115,8 @@ io.on('connection', (socket) => {
          io.emit('voice-rooms-state', voiceRooms);
       }
 
-      if (socket.peerId && allTimeUsers[socket.peerId]) {
-         allTimeUsers[socket.peerId].isOnline = false;
+      if (socket.userId && allTimeUsers[socket.userId]) {
+         allTimeUsers[socket.userId].isOnline = false;
          io.emit('global-users', allTimeUsers);
       }
    });
