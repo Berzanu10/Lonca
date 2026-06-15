@@ -2,11 +2,13 @@
   "text": [
     "genel",
     "oyun",
-    "muzik"
+    "muzik",
+    "koordinatlar"
   ],
   "voice": [
     "sohbet",
     "oyun",
-    "sessiz"
+    "sessiz",
+    "Yeni kanal"
   ]
 }

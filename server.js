@@ -293,11 +293,21 @@ io.on('connection', (socket) => {
                sender: 'Sistem',
                text: `${socket.username || 'Bir kullanıcı'} bir mesajı bu kanala sabitledi.`,
                timestamp: Date.now(),
-               isSystem: true
+               isSystem: true,
+               pinnedMsgId: msgId
             };
             messageHistory[roomId].push(sysMsg);
             saveMessages();
             io.to('text-' + roomId).emit('create-message', sysMsg.text, sysMsg.sender, sysMsg.id, sysMsg.isSystem);
+         } else {
+            // Unpinned! Find and remove the linked system message
+            const sysIndex = messageHistory[roomId].findIndex(m => m.isSystem && m.pinnedMsgId === msgId);
+            if (sysIndex !== -1) {
+               const sysMsgId = messageHistory[roomId][sysIndex].id;
+               messageHistory[roomId].splice(sysIndex, 1);
+               saveMessages();
+               io.to('text-' + roomId).emit('message-deleted', sysMsgId);
+            }
          }
       }
    });

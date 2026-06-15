@@ -572,27 +572,39 @@ function appendMessage(sender, msg, msgId, isSystem, isPinned) {
     contentDiv.appendChild(textWrapper);
     div.appendChild(contentDiv);
 
-    // 3-dots actions button (hidden on system messages)
-    if (!isSystem) {
-        const actionsBtn = document.createElement('div');
-        actionsBtn.className = 'message-actions-btn';
-        actionsBtn.title = 'Aksiyonlar';
-        actionsBtn.innerHTML = '•••';
-        
-        actionsBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            closeAllContextMenus();
-            openContextMenu(div, msgId, sender);
-        });
-        
-        div.appendChild(actionsBtn);
-    }
+    // 3-dots actions button (always display so all messages can be select/delete managed)
+    const actionsBtn = document.createElement('div');
+    actionsBtn.className = 'message-actions-btn';
+    actionsBtn.title = 'Aksiyonlar';
+    actionsBtn.innerHTML = `
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="display: block;">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M7 12a2 2 0 11-4 0 2 2 0 014 0zm7 0a2 2 0 11-4 0 2 2 0 014 0zm7 0a2 2 0 11-4 0 2 2 0 014 0z"/>
+        </svg>
+    `;
+    
+    actionsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeAllContextMenus();
+        openContextMenu(div, msgId, sender, isSystem);
+    });
+    
+    div.appendChild(actionsBtn);
 
     // Hover list message click for selection mode
     div.addEventListener('click', (e) => {
         if (isSelectionMode) {
+            // If click was on checkbox, ignore (checkbox handler will fire change event)
+            if (e.target.className === 'message-checkbox') {
+                return;
+            }
             e.preventDefault();
             toggleMessageSelection(msgId, div, checkbox);
+        }
+    });
+
+    checkbox.addEventListener('click', (e) => {
+        if (isSelectionMode) {
+            e.stopPropagation();
         }
     });
 
@@ -607,27 +619,31 @@ function appendMessage(sender, msg, msgId, isSystem, isPinned) {
     messages.scrollTop = messages.scrollHeight;
 }
 
-function openContextMenu(messageDiv, msgId, sender) {
+function openContextMenu(messageDiv, msgId, sender, isSystem) {
     const menu = document.createElement('div');
     menu.className = 'message-context-menu';
     
-    const msgObj = activeRoomMessages.find(m => m.id === msgId);
-    const isCurrentlyPinned = msgObj ? !!msgObj.pinned : false;
+    if (!isSystem) {
+        const msgObj = activeRoomMessages.find(m => m.id === msgId);
+        const isCurrentlyPinned = msgObj ? !!msgObj.pinned : false;
 
-    // Pin option
-    const pinBtn = document.createElement('button');
-    pinBtn.className = 'context-menu-item';
-    pinBtn.innerHTML = isCurrentlyPinned ? '📌 İğneyi Kaldır' : '📌 Mesajı Sabitle';
-    pinBtn.onclick = () => {
-        socket.emit('pin-message', msgId);
-        closeAllContextMenus();
-    };
-    menu.appendChild(pinBtn);
+        // Pin option
+        const pinBtn = document.createElement('button');
+        pinBtn.className = 'context-menu-item';
+        pinBtn.innerHTML = isCurrentlyPinned 
+            ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 6px;"><path d="M16 12V4h1v-2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg> Sabitlemeyi Kaldır`
+            : `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 6px;"><path d="M16 12V4h1v-2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg> Sabitle`;
+        pinBtn.onclick = () => {
+            socket.emit('pin-message', msgId);
+            closeAllContextMenus();
+        };
+        menu.appendChild(pinBtn);
+    }
 
     // Select option
     const selectBtn = document.createElement('button');
     selectBtn.className = 'context-menu-item';
-    selectBtn.innerHTML = '☑️ Mesajı Seç';
+    selectBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><polyline points="20 6 9 17 4 12"/></svg> Seç`;
     selectBtn.onclick = () => {
         enterSelectionMode();
         toggleMessageSelection(msgId, messageDiv, messageDiv.querySelector('.message-checkbox'), true);
@@ -639,7 +655,7 @@ function openContextMenu(messageDiv, msgId, sender) {
     if (amIAdmin) {
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'context-menu-item danger';
-        deleteBtn.innerHTML = '🗑️ Mesajı Sil';
+        deleteBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg> Sil`;
         deleteBtn.onclick = () => {
             showCustomConfirm("Mesajı Sil", "Bu mesajı silmek istediğinize emin misiniz?", true, () => {
                 socket.emit('delete-message', msgId);
