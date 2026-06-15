@@ -225,3 +225,184 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
       grid-template-columns: 1fr;
   }
 }
+
+/* ----------------------------------
+   PROFİL MODAL (Discord Stili)
+-------------------------------------*/
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1001;
+  animation: fadein 0.2s ease;
+}
+
+.profile-modal-content {
+  width: 320px;
+  background: #18191c;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.profile-banner {
+  height: 60px;
+  background-color: var(--highlight-color);
+}
+
+.profile-avatar-container {
+  position: relative;
+  height: 40px;
+  margin-bottom: 15px;
+}
+
+.modal-avatar {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background-color: #202225;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23dcddde"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>');
+  background-size: 50px;
+  background-position: center bottom;
+  background-repeat: no-repeat;
+  border: 6px solid #18191c;
+  position: absolute;
+  top: -40px;
+  left: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  transition: all 0.1s ease;
+}
+
+.avatar-edit-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: bold;
+  gap: 4px;
+}
+
+.modal-avatar:hover .avatar-edit-overlay {
+  opacity: 1;
+}
+
+.profile-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.profile-body label {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.profile-input-wrapper {
+  display: flex;
+  align-items: center;
+  background-color: #202225;
+  border-radius: 4px;
+  padding: 0 10px;
+  border: 1px solid #101112;
+}
+
+.profile-username-input {
+  flex-grow: 1;
+  background: transparent;
+  border: none;
+  color: #fff;
+  padding: 10px 0;
+  font-size: 0.95rem;
+  outline: none;
+}
+
+.profile-tag-suffix {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  font-weight: 500;
+  margin-left: 5px;
+}
+
+.profile-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 15px;
+}
+
+.profile-right-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.save-btn {
+  background: var(--highlight-color);
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.save-btn:hover {
+  background: #4752c4;
+}
+
+.cancel-btn {
+  background: transparent;
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-weight: 500;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.cancel-btn:hover {
+  text-decoration: underline;
+}
+
+.logout-btn {
+  background: transparent;
+  color: var(--danger-color);
+  border: none;
+  padding: 8px 0;
+  font-weight: 500;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.logout-btn:hover {
+  text-decoration: underline;
+}

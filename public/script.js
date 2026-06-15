@@ -6,6 +6,7 @@ if (!myUserId) {
     myUserId = 'user_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
     localStorage.setItem('userId', myUserId);
 }
+let myAvatar = localStorage.getItem('avatar') || '';
 
 let currentTextRoom = 'genel';
 let currentVoiceRoom = null;
@@ -44,6 +45,14 @@ const activeVoiceRoomName = document.getElementById('active-voice-room-name');
 const displayMyUsername = document.getElementById('display-my-username');
 const settingsBtn = document.getElementById('settings-btn');
 
+const currentUserInfo = document.getElementById('current-user-info');
+const profileModal = document.getElementById('profile-modal');
+const profileUsernameInput = document.getElementById('profile-username-input');
+const modalAvatarPreview = document.getElementById('modal-avatar-preview');
+const avatarFileInput = document.getElementById('avatar-file-input');
+const profileSaveBtn = document.getElementById('profile-save-btn');
+const profileCancelBtn = document.getElementById('profile-cancel-btn');
+
 const micSVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>`;
 const headSVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c-4.97 0-9 4.03-9 9v7c0 1.1.9 2 2 2h4v-8H5v-1c0-3.87 3.13-7 7-7s7 3.13 7 7v1h-4v8h4c1.1 0 2-.9 2-2v-7c0-4.97-4.03-9-9-9z"/></svg>`;
 
@@ -52,6 +61,11 @@ const savedUsername = localStorage.getItem('username');
 if (savedUsername) {
     myUsername = savedUsername;
     displayMyUsername.textContent = myUsername;
+    const myAv = document.getElementById('my-avatar');
+    if (myAv && myAvatar) {
+        myAv.style.backgroundImage = `url(${myAvatar})`;
+        myAv.style.backgroundSize = 'cover';
+    }
     loginScreen.style.display = 'none';
     appContainer.style.display = 'flex';
     initializePeer();
@@ -63,26 +77,101 @@ joinBtn.addEventListener('click', () => {
         myUsername = name;
         localStorage.setItem('username', name);
         displayMyUsername.textContent = myUsername;
-
+        const myAv = document.getElementById('my-avatar');
+        if (myAv && myAvatar) {
+            myAv.style.backgroundImage = `url(${myAvatar})`;
+            myAv.style.backgroundSize = 'cover';
+        }
         loginScreen.style.display = 'none';
         appContainer.style.display = 'flex';
         initializePeer();
     } else alert("Takma ad boş olamaz.");
 });
 
+function openProfileModal() {
+    profileUsernameInput.value = myUsername;
+    if (myAvatar) {
+        modalAvatarPreview.style.backgroundImage = `url(${myAvatar})`;
+        modalAvatarPreview.style.backgroundSize = 'cover';
+    } else {
+        modalAvatarPreview.style.backgroundImage = '';
+    }
+    profileModal.style.display = 'flex';
+}
+
+if (currentUserInfo) {
+    currentUserInfo.addEventListener('click', openProfileModal);
+}
 if (settingsBtn) {
-    settingsBtn.addEventListener('click', () => {
-        const newName = prompt("Yeni kullanıcı adınızı girin (Kayıtlı ismi silmek ve çıkış yapmak için boş bırakın):", myUsername);
-        if (newName === null) return; // Cancelled
-        const trimmed = newName.trim();
-        if (trimmed) {
-            localStorage.setItem('username', trimmed);
-            location.reload();
-        } else {
-            localStorage.removeItem('username');
-            localStorage.removeItem('userId'); // Remove userId to start fresh next time
-            location.reload();
+    settingsBtn.addEventListener('click', openProfileModal);
+}
+
+if (modalAvatarPreview && avatarFileInput) {
+    modalAvatarPreview.addEventListener('click', () => {
+        avatarFileInput.click();
+    });
+
+    avatarFileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const img = new Image();
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    const MAX_WIDTH = 128;
+                    const MAX_HEIGHT = 128;
+                    let width = img.width;
+                    let height = img.height;
+
+                    if (width > height) {
+                        if (width > MAX_WIDTH) {
+                            height *= MAX_WIDTH / width;
+                            width = MAX_WIDTH;
+                        }
+                    } else {
+                        if (height > MAX_HEIGHT) {
+                            width *= MAX_HEIGHT / height;
+                            height = MAX_HEIGHT;
+                        }
+                    }
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+                    
+                    modalAvatarPreview.style.backgroundImage = `url(${dataUrl})`;
+                    modalAvatarPreview.style.backgroundSize = 'cover';
+                    modalAvatarPreview.dataset.tempAvatar = dataUrl;
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
         }
+    });
+}
+
+if (profileCancelBtn) {
+    profileCancelBtn.addEventListener('click', () => {
+        profileModal.style.display = 'none';
+        if (modalAvatarPreview) delete modalAvatarPreview.dataset.tempAvatar;
+    });
+}
+
+if (profileSaveBtn) {
+    profileSaveBtn.addEventListener('click', () => {
+        const newName = profileUsernameInput.value.trim();
+        if (!newName) {
+            alert("Kullanıcı adı boş olamaz.");
+            return;
+        }
+        localStorage.setItem('username', newName);
+        if (modalAvatarPreview && modalAvatarPreview.dataset.tempAvatar) {
+            localStorage.setItem('avatar', modalAvatarPreview.dataset.tempAvatar);
+        }
+        profileModal.style.display = 'none';
+        location.reload();
     });
 }
 
@@ -91,7 +180,7 @@ function initializePeer() {
 
     peer.on('open', id => {
         myPeerId = id;
-        socket.emit('register', myPeerId, myUsername, myUserId);
+        socket.emit('register', myPeerId, myUsername, myUserId, myAvatar);
         joinTextRoom(currentTextRoom);
     });
 
@@ -191,7 +280,16 @@ socket.on('global-users', (usersObj) => {
 
         const avatar = document.createElement('div');
         avatar.className = 'right-panel-avatar';
-        avatar.textContent = u.username.charAt(0).toUpperCase();
+        if (u.avatar) {
+            avatar.style.backgroundImage = `url(${u.avatar})`;
+            avatar.style.backgroundSize = 'cover';
+            avatar.style.color = 'transparent';
+            avatar.textContent = '';
+        } else {
+            avatar.style.backgroundImage = '';
+            avatar.style.color = '';
+            avatar.textContent = u.username.charAt(0).toUpperCase();
+        }
         infoDiv.appendChild(avatar);
 
         const nameSpan = document.createElement('span');
@@ -240,6 +338,13 @@ function joinTextRoom(room) {
     socket.emit('join-text-room', room);
 }
 socket.on('create-message', (message, senderName) => appendMessage(senderName, message));
+socket.on('chat-history', (history) => {
+    messages.innerHTML = '';
+    history.forEach(msg => {
+        appendMessage(msg.sender, msg.text);
+    });
+    messages.scrollTop = messages.scrollHeight;
+});
 chatForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const msg = chatInput.value.trim();
@@ -319,6 +424,10 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
                 const circle = document.createElement('div');
                 circle.className = 'voice-avatar';
                 circle.id = 'voice-user-avatar-' + id;
+                if (userDataObj.avatar) {
+                    circle.style.backgroundImage = `url(${userDataObj.avatar})`;
+                    circle.style.backgroundSize = 'cover';
+                }
 
                 const nameSpan = document.createElement('span');
                 // İsim hatası için garantili MyUsername ataması (undefined sorununu çözer)
