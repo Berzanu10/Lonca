@@ -102,7 +102,7 @@ function decodeJwt(token) {
 // CONFIG ENDPOINT
 app.get('/api/config', (req, res) => {
    res.json({
-      googleClientId: process.env.GOOGLE_CLIENT_ID || "333857503713-kcr56p6v2488a0q2093e0b82fspv7s5m.apps.googleusercontent.com" // Varsayılan localhost Client ID'si (Gerekirse değiştirilebilir)
+      googleClientId: process.env.GOOGLE_CLIENT_ID || "" // Boş bırakıldığında otomatik simüle Google butonuna döner. Gerçek OAuth için Google Client ID girilmelidir.
    });
 });
 
@@ -283,6 +283,44 @@ app.post('/api/auth/google', (req, res) => {
 });
 
 const passwordResetCodes = new Map(); // email -> code
+const nodemailer = require('nodemailer');
+
+// Nodemailer Transporter Setup
+let transporter;
+const smtpHost = process.env.SMTP_HOST || 'smtp.ethereal.email';
+const smtpPort = process.env.SMTP_PORT || 587;
+const smtpUser = process.env.SMTP_USER;
+const smtpPass = process.env.SMTP_PASS;
+
+if (smtpUser && smtpPass) {
+   transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpPort == 465,
+      auth: {
+         user: smtpUser,
+         pass: smtpPass
+      }
+   });
+} else {
+   // Fallback to Ethereal fake SMTP for local testing
+   nodemailer.createTestAccount((err, account) => {
+      if (err) {
+         console.error('Ethereal SMTP test hesabı oluşturulamadı:', err);
+         return;
+      }
+      console.log(`[SMTP] Ethereal test hesabı oluşturuldu. User: ${account.user}`);
+      transporter = nodemailer.createTransport({
+         host: 'smtp.ethereal.email',
+         port: 587,
+         secure: false,
+         auth: {
+            user: account.user,
+            pass: account.pass
+         }
+      });
+   });
+}
 
 // FORGOT PASSWORD ENDPOINT
 app.post('/api/auth/forgot-password', (req, res) => {
@@ -307,10 +345,43 @@ app.post('/api/auth/forgot-password', (req, res) => {
 
    console.log(`[ŞİFRE SIFIRLAMA] Kullanıcı: ${normalizedEmail}, Kod: ${code}`);
 
+   // Send real e-mail using Nodemailer
+   if (transporter) {
+      const mailOptions = {
+         from: '"Lonca" <noreply@lonca.com>',
+         to: normalizedEmail,
+         subject: 'Lonca Şifre Sıfırlama Kodu',
+         text: `Lonca şifrenizi sıfırlamak için doğrulama kodunuz: ${code}`,
+         html: `
+            <div style="font-family: 'Segoe UI', sans-serif; background-color: #1e1f22; color: #dbdee1; padding: 30px; border-radius: 8px; max-width: 500px; margin: auto; border: 1px solid rgba(255,255,255,0.05);">
+               <h2 style="color: #5865F2; margin-top: 0;">Lonca Şifre Sıfırlama</h2>
+               <p style="font-size: 1rem; line-height: 1.5;">Şifrenizi sıfırlamak için doğrulama kodunuz aşağıdadır. Lütfen bu kodu uygulamadaki alana girin:</p>
+               <div style="background-color: #2b2d31; padding: 15px; border-radius: 4px; text-align: center; margin: 25px 0;">
+                  <span style="font-size: 2rem; font-weight: bold; letter-spacing: 4px; color: #fff;">${code}</span>
+               </div>
+               <p style="font-size: 0.85rem; color: #949ba4;">Bu talebi siz yapmadıysanız lütfen bu e-postayı dikkate almayın.</p>
+            </div>
+         `
+      };
+      
+      transporter.sendMail(mailOptions, (error, info) => {
+         if (error) {
+            console.error('[SMTP] E-posta gönderilirken hata oluştu:', error);
+         } else {
+            console.log('[SMTP] E-posta başarıyla gönderildi: %s', info.messageId);
+            const testUrl = nodemailer.getTestMessageUrl(info);
+            if (testUrl) {
+               console.log(`[SMTP Test] Gönderilen test e-postasını buradan okuyabilirsiniz:\n--> ${testUrl} <--`);
+            }
+         }
+      });
+   } else {
+      console.log(`[SMTP] E-posta gönderilemedi çünkü SMTP taşıyıcısı henüz hazır değil. Kod: ${code}`);
+   }
+
    res.json({
       success: true,
-      message: `Şifre sıfırlama kodu gönderildi.`,
-      code: code
+      message: `Şifre sıfırlama kodu e-postanıza gönderildi.`
    });
 });
 

@@ -17,13 +17,22 @@
       
       <!-- Sol Panel: Degrade ve Tanıtım -->
       <div class="login-left-panel">
-        <div class="brand-logo">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+        <div class="logo-animation-container">
+          <!-- Animated Shield & L Logo -->
+          <svg class="lonca-logo-svg" width="160" height="160" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#5865F2" />
+                <stop offset="50%" stop-color="#7289DA" />
+                <stop offset="100%" stop-color="#8a2be2" />
+              </linearGradient>
+            </defs>
+            <path class="logo-path shield-path" d="M50,15 L78,25 C78,55 68,75 50,85 C32,75 22,55 22,25 Z" stroke="url(#logo-grad)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
+            <path class="logo-path l-path" d="M44,32 L44,60 C44,65 47,68 52,68 L60,68 C63,68 66,65 66,62 C66,59 63,56 60,56 L50,56 C47,56 45,54 45,51 C45,48 47,46 50,46 L58,46" stroke="url(#logo-grad)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
+          <h1 class="logo-text">Lonca</h1>
         </div>
-        <h1>Lonca</h1>
-        <p>Gelişmiş sohbet, ses kanalları ve ekran paylaşımı dünyasına adım atın.</p>
+        <p class="logo-desc">Gelişmiş sohbet, ses kanalları ve ekran paylaşımı dünyasına adım atın.</p>
         <div class="glowing-orb"></div>
       </div>
 
