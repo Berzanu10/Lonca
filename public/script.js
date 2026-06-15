@@ -36,14 +36,26 @@ const bottomLeaveVoiceBtn = document.getElementById('bottom-leave-voice');
 const voiceConnectionInfo = document.getElementById('voice-connection-info');
 const activeVoiceRoomName = document.getElementById('active-voice-room-name');
 const displayMyUsername = document.getElementById('display-my-username');
+const settingsBtn = document.getElementById('settings-btn');
 
 const micSVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>`;
 const headSVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c-4.97 0-9 4.03-9 9v7c0 1.1.9 2 2 2h4v-8H5v-1c0-3.87 3.13-7 7-7s7 3.13 7 7v1h-4v8h4c1.1 0 2-.9 2-2v-7c0-4.97-4.03-9-9-9z"/></svg>`;
+
+// Check if username is saved in localStorage
+const savedUsername = localStorage.getItem('username');
+if (savedUsername) {
+    myUsername = savedUsername;
+    displayMyUsername.textContent = myUsername;
+    loginScreen.style.display = 'none';
+    appContainer.style.display = 'flex';
+    initializePeer();
+}
 
 joinBtn.addEventListener('click', () => {
     const name = usernameInput.value.trim();
     if (name) {
         myUsername = name;
+        localStorage.setItem('username', name);
         displayMyUsername.textContent = myUsername;
 
         loginScreen.style.display = 'none';
@@ -51,6 +63,21 @@ joinBtn.addEventListener('click', () => {
         initializePeer();
     } else alert("Takma ad boş olamaz.");
 });
+
+if (settingsBtn) {
+    settingsBtn.addEventListener('click', () => {
+        const newName = prompt("Yeni kullanıcı adınızı girin (Kayıtlı ismi silmek ve çıkış yapmak için boş bırakın):", myUsername);
+        if (newName === null) return; // Cancelled
+        const trimmed = newName.trim();
+        if (trimmed) {
+            localStorage.setItem('username', trimmed);
+            location.reload();
+        } else {
+            localStorage.removeItem('username');
+            location.reload();
+        }
+    });
+}
 
 function initializePeer() {
     peer = new Peer(undefined, { path: '/peerjs', host: '/', port: location.port || (location.protocol === 'https:' ? 443 : 80) });
