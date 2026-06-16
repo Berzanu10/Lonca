@@ -98,7 +98,7 @@ function verifyPassword(password, storedPassword) {
 }
 
 // PURE NODE.JS JWT SYSTEM (ZERO DEPENDENCIES)
-const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
+const JWT_SECRET = process.env.JWT_SECRET || 'lonca_super_secret_fallback_key_123';
 
 function generateToken(payload) {
    const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
