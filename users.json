@@ -39,5 +39,13 @@
     "googleId": "mock_google_unique_testuser_99@gmail.com",
     "avatar": "https://api.dicebear.com/7.x/identicon/svg?seed=unique_testuser_99",
     "isAdmin": false
+  },
+  "user_gmvrlp3oi_1781617077714": {
+    "id": "user_gmvrlp3oi_1781617077714",
+    "username": "TestUser",
+    "email": "testuser@example.com",
+    "password": "ab04fb6b1663f395f39e7858a967f046:b3384439891d41a6363466429133a98ced031602b307f7989442792355272557ab32ed981fc1c3936b91e4c6ad6419270bcd5c95b518ae016f9255b643b0e813",
+    "avatar": "",
+    "isAdmin": false
   }
 }

@@ -480,7 +480,8 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
 .call-participant-card video {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+  background: #000;
 }
 
 .call-participant-avatar-view {
@@ -1638,6 +1639,51 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
 #incoming-call-modal .confirm-modal-content {
   border: 1px solid var(--highlight-color);
   box-shadow: 0 0 25px rgba(88, 101, 242, 0.4);
+}
+
+/* Screen Watch wrapper fullscreen fallback controls */
+#screen-watch-wrapper:fullscreen {
+  width: 100vw !important;
+  height: 100vh !important;
+  max-height: none !important;
+}
+#screen-watch-wrapper:-webkit-full-screen {
+  width: 100vw !important;
+  height: 100vh !important;
+  max-height: none !important;
+}
+
+/* Participant zoom feature inside private call grid */
+.call-participant-zoom-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #dbdee1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  opacity: 0;
+  transition: opacity 0.2s ease, background-color 0.15s ease, color 0.15s ease;
+}
+.call-participant-card:hover .call-participant-zoom-btn {
+  opacity: 1;
+}
+.call-participant-zoom-btn:hover {
+  background: rgba(0, 0, 0, 0.9);
+  color: #fff;
+}
+.call-participant-card.focused {
+  grid-column: 1 / -1;
+  max-width: 960px;
+  width: 100%;
+  aspect-ratio: 16 / 9;
 }
 
 

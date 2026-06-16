@@ -1939,9 +1939,34 @@ function addVideoStream(stream, peerId, username) {
     absLabel.className = 'call-participant-name-tag-absolute';
     absLabel.textContent = username;
     
+    // Zoom button
+    const zoomBtn = document.createElement('button');
+    zoomBtn.className = 'call-participant-zoom-btn';
+    zoomBtn.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19 12h-2v3h-3v2h5v-5zM7 10h2V7h3V5H5v5zm12-5h-5v2h3v3h2V5zM7 14H5v5h5v-2H7v-3z"/>
+        </svg>
+    `;
+    zoomBtn.title = "Büyüt / Küçült";
+    zoomBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        card.classList.toggle('focused');
+        const isFocused = card.classList.contains('focused');
+        zoomBtn.innerHTML = isFocused ? `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/>
+            </svg>
+        ` : `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19 12h-2v3h-3v2h5v-5zM7 10h2V7h3V5H5v5zm12-5h-5v2h3v3h2V5zM7 14H5v5h5v-2H7v-3z"/>
+            </svg>
+        `;
+    });
+    
     card.appendChild(v);
     card.appendChild(avatarView);
     card.appendChild(absLabel);
+    card.appendChild(zoomBtn);
     
     document.getElementById('video-grid').appendChild(card);
     
@@ -2298,14 +2323,22 @@ if (screenWatchStopBtn) {
 const screenWatchFullscreenBtn = document.getElementById('screen-watch-fullscreen-btn');
 if (screenWatchFullscreenBtn) {
     screenWatchFullscreenBtn.addEventListener('click', () => {
-        const video = document.getElementById('screen-watch-video');
-        if (video) {
-            if (video.requestFullscreen) {
-                video.requestFullscreen();
-            } else if (video.webkitRequestFullscreen) {
-                video.webkitRequestFullscreen();
-            } else if (video.msRequestFullscreen) {
-                video.msRequestFullscreen();
+        const wrapper = document.getElementById('screen-watch-wrapper');
+        if (wrapper) {
+            if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+                if (wrapper.requestFullscreen) {
+                    wrapper.requestFullscreen();
+                } else if (wrapper.webkitRequestFullscreen) {
+                    wrapper.webkitRequestFullscreen();
+                } else if (wrapper.msRequestFullscreen) {
+                    wrapper.msRequestFullscreen();
+                }
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                } else if (document.webkitExitFullscreen) {
+                    document.webkitExitFullscreen();
+                }
             }
         }
     });
