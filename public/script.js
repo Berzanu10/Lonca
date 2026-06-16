@@ -221,6 +221,7 @@ function handleLoginSuccess(data) {
     localStorage.setItem('username', myUsername);
     localStorage.setItem('userId', myUserId);
     localStorage.setItem('avatar', myAvatar);
+    localStorage.setItem('bio', data.user.bio || '');
 
     displayMyUsername.textContent = myUsername;
     const myAv = document.getElementById('my-avatar');
@@ -253,6 +254,7 @@ function clearSession() {
     localStorage.removeItem('username');
     localStorage.removeItem('userId');
     localStorage.removeItem('avatar');
+    localStorage.removeItem('bio');
 }
 
 function showLoginScreen() {
@@ -590,6 +592,10 @@ function openProfileModal(isForceEdit = false) {
     }
 
     profileUsernameInput.value = myUsername || '';
+    const bioInput = document.getElementById('profile-bio-input');
+    if (bioInput) {
+        bioInput.value = localStorage.getItem('bio') || '';
+    }
 
     // Badges & role updating
     const badgesDiv = document.getElementById('profile-modal-badges');
@@ -791,6 +797,8 @@ if (profileSaveBtn) {
         }
         
         const avatarData = (modalAvatarPreview && modalAvatarPreview.dataset.tempAvatar) ? modalAvatarPreview.dataset.tempAvatar : myAvatar;
+        const bioInput = document.getElementById('profile-bio-input');
+        const bioData = bioInput ? bioInput.value.trim() : '';
 
         const sessionToken = localStorage.getItem('sessionToken');
 
@@ -802,7 +810,8 @@ if (profileSaveBtn) {
             },
             body: JSON.stringify({
                 username: newName,
-                avatar: avatarData
+                avatar: avatarData,
+                bio: bioData
             })
         })
         .then(r => r.json())
@@ -810,6 +819,7 @@ if (profileSaveBtn) {
             if (data.success) {
                 localStorage.setItem('username', data.user.username);
                 localStorage.setItem('avatar', data.user.avatar || '');
+                localStorage.setItem('bio', data.user.bio || '');
                 localStorage.removeItem('adminToken');
                 profileModal.style.display = 'none';
                 location.reload();
@@ -876,7 +886,17 @@ function initializePeer() {
         let callerName = "Biri";
         for (let ip in allUsersList) if (allUsersList[ip].peerId === call.peer) callerName = allUsersList[ip].username;
 
-        showCustomConfirm("Özel Arama", `${callerName} sizi ÖZEL görüntülü arıyor! Kabul ediyor musunuz?`, false, async () => {
+        const incomingModal = document.getElementById('incoming-call-modal');
+        const incomingUsername = document.getElementById('incoming-call-username');
+        const acceptBtn = document.getElementById('incoming-call-accept-btn');
+        const rejectBtn = document.getElementById('incoming-call-reject-btn');
+
+        incomingUsername.textContent = callerName;
+        incomingModal.style.display = 'flex';
+
+        acceptBtn.onclick = async () => {
+            incomingModal.style.display = 'none';
+            disconnectVoiceRoom();
             try {
                 if (!localVideoStream) localVideoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
                 call.answer(localVideoStream);
@@ -884,8 +904,13 @@ function initializePeer() {
                 openVideoModal(); addVideoStream(localVideoStream, 'local', 'Sen');
                 call.on('stream', userStream => addVideoStream(userStream, call.peer, callerName));
                 call.on('close', () => endPrivateCall());
-            } catch (err) { showCustomAlert("Hata", "Kameraya erişim sağlanamadı."); }
-        });
+            } catch (err) { showCustomAlert("Hata", "Kameraya/Mikrofona erişim sağlanamadı: " + err.message); }
+        };
+
+        rejectBtn.onclick = () => {
+            incomingModal.style.display = 'none';
+            call.close();
+        };
     });
 }
 
@@ -1155,6 +1180,13 @@ function appendMessage(sender, msg, msgId, isSystem, isPinned) {
     } else {
         const strong = document.createElement('strong');
         strong.textContent = sender + ':';
+        strong.style.cursor = 'pointer';
+        strong.addEventListener('click', () => {
+            const user = Object.values(allUsersList).find(u => u.username === sender);
+            if (user) {
+                showUserProfileCard(user.userId);
+            }
+        });
         const span = document.createElement('span');
         span.textContent = msg;
         textWrapper.appendChild(strong);
@@ -2306,7 +2338,177 @@ function updateServerUsersList(server) {
             li.appendChild(actionsDiv);
         }
 
+        // Clicking server user list item opens profile card
+        infoDiv.style.cursor = 'pointer';
+        infoDiv.addEventListener('click', (e) => {
+            e.stopPropagation();
+            showUserProfileCard(uid);
+        });
+
         listEl.appendChild(li);
+    });
+}
+
+// ==========================================
+// PROFİL KARTI & ÖZEL ARAMA SİSTEMİ
+// ==========================================
+async function showUserProfileCard(userId) {
+    const sessionToken = localStorage.getItem('sessionToken');
+    if (!sessionToken) return;
+
+    try {
+        const res = await fetch(`/api/users/${userId}`, {
+            headers: { 'Authorization': `Bearer ${sessionToken}` }
+        });
+        const data = await res.json();
+        if (data.success) {
+            const user = data.user;
+            
+            document.getElementById('user-profile-card-username').textContent = user.username;
+            document.getElementById('user-profile-card-username').nextElementSibling.textContent = `@${user.username.toLowerCase().replace(/\s+/g, '')}`;
+            document.getElementById('user-profile-card-bio').textContent = user.bio || 'Biyografi yok.';
+            
+            const avatarDiv = document.getElementById('user-profile-card-avatar');
+            if (user.avatar) {
+                avatarDiv.style.backgroundImage = `url(${user.avatar})`;
+                avatarDiv.style.color = 'transparent';
+                avatarDiv.textContent = '';
+            } else {
+                avatarDiv.style.backgroundImage = '';
+                avatarDiv.style.color = '#fff';
+                avatarDiv.textContent = user.username.charAt(0).toUpperCase();
+            }
+
+            const actionsDiv = document.getElementById('user-profile-card-actions');
+            actionsDiv.innerHTML = '';
+
+            if (userId === myUserId) {
+                const editBtn = document.createElement('button');
+                editBtn.className = 'save-btn';
+                editBtn.style.width = '100%';
+                editBtn.style.marginTop = '0';
+                editBtn.textContent = 'Profili Düzenle';
+                editBtn.onclick = () => {
+                    document.getElementById('user-profile-card').style.display = 'none';
+                    openProfileModal(false);
+                };
+                actionsDiv.appendChild(editBtn);
+            } else {
+                const isFriend = friendsData.friends.some(f => f.id === userId);
+                const isIncoming = friendsData.pending_incoming.some(f => f.id === userId);
+                const isOutgoing = friendsData.pending_outgoing.some(f => f.id === userId);
+
+                if (isFriend) {
+                    const callBtn = document.createElement('button');
+                    callBtn.className = 'save-btn';
+                    callBtn.style.cssText = 'width: 100%; margin-top: 0; background-color: var(--success-color);';
+                    callBtn.textContent = 'Ara';
+                    callBtn.onclick = () => {
+                        document.getElementById('user-profile-card').style.display = 'none';
+                        const u = allUsersList[userId];
+                        if (u && u.peerId) {
+                            initiatePrivateCall(u.peerId, u.username);
+                        } else {
+                            showCustomAlert("Hata", "Kullanıcı çevrimdışı veya aranamıyor.");
+                        }
+                    };
+                    actionsDiv.appendChild(callBtn);
+
+                    const dmBtn = document.createElement('button');
+                    dmBtn.className = 'save-btn';
+                    dmBtn.style.cssText = 'width: 100%; margin-top: 0; background-color: var(--highlight-color);';
+                    dmBtn.textContent = 'Mesaj Gönder';
+                    dmBtn.onclick = () => {
+                        document.getElementById('user-profile-card').style.display = 'none';
+                        selectServer('home');
+                        startDM(user.id, user.username);
+                    };
+                    actionsDiv.appendChild(dmBtn);
+                } else if (isIncoming) {
+                    const acceptBtn = document.createElement('button');
+                    acceptBtn.className = 'save-btn';
+                    acceptBtn.style.cssText = 'width: 100%; margin-top: 0; background-color: var(--success-color);';
+                    acceptBtn.textContent = 'Arkadaşlık İsteğini Kabul Et';
+                    acceptBtn.onclick = async () => {
+                        document.getElementById('user-profile-card').style.display = 'none';
+                        await handleFriendAction(userId, 'accept');
+                    };
+                    actionsDiv.appendChild(acceptBtn);
+
+                    const rejectBtn = document.createElement('button');
+                    rejectBtn.className = 'danger-btn';
+                    rejectBtn.style.cssText = 'width: 100%; margin-top: 0;';
+                    rejectBtn.textContent = 'Reddet';
+                    rejectBtn.onclick = async () => {
+                        document.getElementById('user-profile-card').style.display = 'none';
+                        await handleFriendAction(userId, 'reject');
+                    };
+                    actionsDiv.appendChild(rejectBtn);
+                } else if (isOutgoing) {
+                    const outgoingBtn = document.createElement('button');
+                    outgoingBtn.className = 'save-btn';
+                    outgoingBtn.disabled = true;
+                    outgoingBtn.style.cssText = 'width: 100%; margin-top: 0; opacity: 0.6; cursor: not-allowed;';
+                    outgoingBtn.textContent = 'Arkadaşlık İsteği Gönderildi';
+                    actionsDiv.appendChild(outgoingBtn);
+                } else {
+                    const addBtn = document.createElement('button');
+                    addBtn.className = 'save-btn';
+                    addBtn.style.cssText = 'width: 100%; margin-top: 0; background-color: var(--highlight-color);';
+                    addBtn.textContent = 'Arkadaş Ekle';
+                    addBtn.onclick = () => {
+                        document.getElementById('user-profile-card').style.display = 'none';
+                        sendFriendRequest(user.username);
+                    };
+                    actionsDiv.appendChild(addBtn);
+                }
+            }
+            
+            document.getElementById('user-profile-card').style.display = 'flex';
+        }
+    } catch (err) {
+        console.error("Kullanıcı profili alınamadı:", err);
+    }
+}
+
+async function initiatePrivateCall(targetPeerId, targetUsername) {
+    if (!targetPeerId) {
+        showCustomAlert("Hata", "Kullanıcıya ulaşılamıyor (Peer ID bulunamadı).");
+        return;
+    }
+    
+    disconnectVoiceRoom();
+
+    try {
+        if (!localVideoStream) {
+            localVideoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        }
+        
+        const call = peer.call(targetPeerId, localVideoStream, {
+            metadata: { type: 'private-call' }
+        });
+        
+        privateCall = call;
+        openVideoModal();
+        addVideoStream(localVideoStream, 'local', 'Sen');
+        
+        call.on('stream', userStream => {
+            addVideoStream(userStream, call.peer, targetUsername);
+        });
+        
+        call.on('close', () => {
+            endPrivateCall();
+        });
+    } catch (err) {
+        showCustomAlert("Hata", "Kameraya/Mikrofona erişim sağlanamadı: " + err.message);
+    }
+}
+
+// Close profile card listener
+const userProfileCardCloseBtn = document.getElementById('user-profile-card-close-btn');
+if (userProfileCardCloseBtn) {
+    userProfileCardCloseBtn.addEventListener('click', () => {
+        document.getElementById('user-profile-card').style.display = 'none';
     });
 }
 
@@ -2433,6 +2635,10 @@ function renderFriendsList() {
 
         const info = document.createElement('div');
         info.className = 'friend-info';
+        info.style.cursor = 'pointer';
+        info.addEventListener('click', () => {
+            showUserProfileCard(friend.id);
+        });
 
         const isOnline = allUsersList[friend.id]?.isOnline || false;
 
@@ -2696,11 +2902,8 @@ friendsTabAll.addEventListener('click', () => switchFriendsTab('all'));
 friendsTabPending.addEventListener('click', () => switchFriendsTab('pending'));
 friendsTabAdd.addEventListener('click', () => switchFriendsTab('add'));
 
-// Friend Add request
-friendAddBtn.addEventListener('click', () => {
-    const target = friendAddInput.value.trim();
+function sendFriendRequest(target) {
     if (!target) return;
-    
     fetch('/api/friends/request', {
         method: 'POST',
         headers: {
@@ -2715,13 +2918,158 @@ friendAddBtn.addEventListener('click', () => {
             friendAddInput.value = '';
             friendAddStatusMsg.style.color = '#23a55a';
             friendAddStatusMsg.textContent = 'Arkadaşlık isteği gönderildi!';
+            showCustomAlert("Başarılı", "Arkadaşlık isteği gönderildi.");
             loadFriends();
         } else {
             friendAddStatusMsg.style.color = '#f23f43';
             friendAddStatusMsg.textContent = data.error || 'İstek gönderilemedi.';
+            showCustomAlert("Hata", data.error || "İstek gönderilemedi.");
         }
     });
-});
+}
+
+// Friend Add request
+if (friendAddBtn) {
+    friendAddBtn.addEventListener('click', () => {
+        const target = friendAddInput.value.trim();
+        if (!target) return;
+        sendFriendRequest(target);
+    });
+}
+
+// Sunucu Ayarları Modal Tetikleyici ve Arayüz Bitişleri
+const serverSettingsTriggerBtn = document.getElementById('server-settings-trigger-btn');
+if (serverSettingsTriggerBtn) {
+    serverSettingsTriggerBtn.addEventListener('click', () => {
+        const server = joinedServers.find(s => s.id === activeServerId);
+        if (server) {
+            const modal = document.getElementById('server-settings-modal');
+            const nameInput = document.getElementById('server-settings-name-input');
+            const codeInput = document.getElementById('server-settings-code-input');
+            const deleteBtn = document.getElementById('server-settings-delete-btn');
+            const leaveBtn = document.getElementById('server-settings-leave-btn');
+            const saveBtn = document.getElementById('server-settings-save-btn');
+            
+            nameInput.value = server.name;
+            codeInput.value = server.inviteCode;
+            
+            const isOwner = server.ownerId === myUserId || amIAdmin;
+            
+            if (activeServerId === 'server_default') {
+                deleteBtn.style.display = 'none';
+                leaveBtn.style.display = 'none';
+                nameInput.disabled = true;
+                saveBtn.style.display = 'none';
+            } else if (isOwner) {
+                deleteBtn.style.display = 'block';
+                leaveBtn.style.display = 'none';
+                nameInput.disabled = false;
+                saveBtn.style.display = 'block';
+            } else {
+                deleteBtn.style.display = 'none';
+                leaveBtn.style.display = 'block';
+                nameInput.disabled = true;
+                saveBtn.style.display = 'none';
+            }
+            
+            modal.style.display = 'flex';
+        }
+    });
+}
+
+const serverSettingsCloseBtn = document.getElementById('server-settings-close-btn');
+const serverSettingsCancelBtn = document.getElementById('server-settings-cancel-btn');
+const closeServerSettingsModal = () => {
+    document.getElementById('server-settings-modal').style.display = 'none';
+};
+if (serverSettingsCloseBtn) serverSettingsCloseBtn.addEventListener('click', closeServerSettingsModal);
+if (serverSettingsCancelBtn) serverSettingsCancelBtn.addEventListener('click', closeServerSettingsModal);
+
+const serverSettingsCopyCodeBtn = document.getElementById('server-settings-copy-code-btn');
+if (serverSettingsCopyCodeBtn) {
+    serverSettingsCopyCodeBtn.addEventListener('click', () => {
+        const codeInput = document.getElementById('server-settings-code-input');
+        navigator.clipboard.writeText(codeInput.value).then(() => {
+            showCustomAlert("Başarılı", "Davet kodu kopyalandı!");
+        });
+    });
+}
+
+const serverSettingsSaveBtn = document.getElementById('server-settings-save-btn');
+if (serverSettingsSaveBtn) {
+    serverSettingsSaveBtn.addEventListener('click', () => {
+        const newName = document.getElementById('server-settings-name-input').value.trim();
+        if (!newName) {
+            showCustomAlert("Hata", "Sunucu adı boş olamaz.");
+            return;
+        }
+        fetch(`/api/servers/${activeServerId}/update`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('sessionToken')}`
+            },
+            body: JSON.stringify({ name: newName })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                closeServerSettingsModal();
+                loadServersAndInit(false);
+            } else {
+                showCustomAlert("Hata", data.error || "Sunucu güncellenemedi.");
+            }
+        });
+    });
+}
+
+const serverSettingsDeleteBtn = document.getElementById('server-settings-delete-btn');
+if (serverSettingsDeleteBtn) {
+    serverSettingsDeleteBtn.addEventListener('click', () => {
+        showCustomConfirm("Sunucuyu Sil", "Sunucuyu tamamen silmek istediğinize emin misiniz? Bu işlem geri alınamaz.", true, () => {
+            fetch(`/api/servers/${activeServerId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('sessionToken')}`
+                }
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    closeServerSettingsModal();
+                    selectServer('home');
+                    loadServersAndInit(false);
+                } else {
+                    showCustomAlert("Hata", data.error || "Sunucu silinemedi.");
+                }
+            });
+        });
+    });
+}
+
+const serverSettingsLeaveBtn = document.getElementById('server-settings-leave-btn');
+if (serverSettingsLeaveBtn) {
+    serverSettingsLeaveBtn.addEventListener('click', () => {
+        showCustomConfirm("Sunucudan Ayrıl", "Sunucudan ayrılmak istediğinize emin misiniz?", true, () => {
+            fetch(`/api/servers/${activeServerId}/leave`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('sessionToken')}`
+                }
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    closeServerSettingsModal();
+                    selectServer('home');
+                    loadServersAndInit(false);
+                } else {
+                    showCustomAlert("Hata", data.error || "Sunucudan ayrılamadı.");
+                }
+            });
+        });
+    });
+}
 
 // Listen to server updates over socket
 socket.on('server-update', (serverId, updatedServer) => {
@@ -2735,7 +3083,54 @@ socket.on('server-update', (serverId, updatedServer) => {
     renderServersList();
     
     if (activeServerId === serverId) {
+        activeServerTitle.textContent = updatedServer.name;
         renderServerChannels(updatedServer);
         updateServerUsersList(updatedServer);
+    }
+});
+
+socket.on('server-deleted', (serverId) => {
+    joinedServers = joinedServers.filter(s => s.id !== serverId);
+    renderServersList();
+    if (activeServerId === serverId) {
+        selectServer('home');
+        showCustomAlert("Bilgi", "Bulunduğunuz sunucu sahibi tarafından silindi.");
+    }
+});
+
+socket.on('friend-update', () => {
+    loadFriends();
+    if (activeServerId === 'home') {
+        renderFriendsList();
+    }
+});
+
+socket.on('dm-received', (data) => {
+    if (socket.textRoom !== data.roomId) {
+        const dmItem = document.querySelector(`.dm-conversations-item[data-id="${data.senderId}"]`);
+        if (dmItem) {
+            dmItem.classList.add('unread');
+            let badge = dmItem.querySelector('.unread-badge');
+            if (!badge) {
+                badge = document.createElement('span');
+                badge.className = 'unread-badge';
+                badge.style.cssText = 'background: var(--danger-color); width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-left: auto;';
+                dmItem.querySelector('div').appendChild(badge);
+            }
+        } else {
+            loadFriends().then(() => {
+                const newDmItem = document.querySelector(`.dm-conversations-item[data-id="${data.senderId}"]`);
+                if (newDmItem) {
+                    newDmItem.classList.add('unread');
+                    let badge = newDmItem.querySelector('.unread-badge');
+                    if (!badge) {
+                        badge = document.createElement('span');
+                        badge.className = 'unread-badge';
+                        badge.style.cssText = 'background: var(--danger-color); width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-left: auto;';
+                        newDmItem.querySelector('div').appendChild(badge);
+                    }
+                }
+            });
+        }
     }
 });

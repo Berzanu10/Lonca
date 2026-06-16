@@ -657,6 +657,79 @@ app.post('/api/servers/join', authenticateToken, (req, res) => {
    res.json({ success: true, server });
 });
 
+app.post('/api/servers/:serverId/update', authenticateToken, (req, res) => {
+   const { serverId } = req.params;
+   const { name } = req.body;
+   const userId = req.user.userId;
+
+   const server = serversDb[serverId];
+   if (!server) return res.status(404).json({ error: 'Sunucu bulunamadı.' });
+
+   if (server.ownerId !== userId && !usersDb[userId].isAdmin) {
+      return res.status(403).json({ error: 'Bu işlem için yetkiniz yok.' });
+   }
+
+   if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Sunucu adı boş olamaz.' });
+   }
+
+   server.name = name.trim();
+   saveServers();
+
+   // Broadcast update to all members
+   io.emit('server-update', serverId, server);
+
+   res.json({ success: true, server });
+});
+
+app.post('/api/servers/:serverId/leave', authenticateToken, (req, res) => {
+   const { serverId } = req.params;
+   const userId = req.user.userId;
+
+   const server = serversDb[serverId];
+   if (!server) return res.status(404).json({ error: 'Sunucu bulunamadı.' });
+
+   if (server.ownerId === userId) {
+      return res.status(400).json({ error: 'Sunucu sahibi sunucudan ayrılamaz. Sunucuyu silmelisiniz.' });
+   }
+
+   if (serverId === 'server_default') {
+      return res.status(400).json({ error: 'Varsayılan sunucudan ayrılamazsınız.' });
+   }
+
+   server.members = server.members.filter(m => m !== userId);
+   saveServers();
+
+   // Broadcast update to remaining members
+   io.emit('server-update', serverId, server);
+
+   res.json({ success: true });
+});
+
+app.delete('/api/servers/:serverId', authenticateToken, (req, res) => {
+   const { serverId } = req.params;
+   const userId = req.user.userId;
+
+   const server = serversDb[serverId];
+   if (!server) return res.status(404).json({ error: 'Sunucu bulunamadı.' });
+
+   if (server.ownerId !== userId && !usersDb[userId].isAdmin) {
+      return res.status(403).json({ error: 'Bu işlem için yetkiniz yok.' });
+   }
+
+   if (serverId === 'server_default') {
+      return res.status(400).json({ error: 'Varsayılan sunucuyu silemezsiniz.' });
+   }
+
+   delete serversDb[serverId];
+   saveServers();
+
+   // Broadcast deletion
+   io.emit('server-deleted', serverId);
+
+   res.json({ success: true });
+});
+
 // FRIENDS & DMS API ENDPOINTS
 app.get('/api/friends', authenticateToken, (req, res) => {
    const userId = req.user.userId;
@@ -709,6 +782,8 @@ app.post('/api/friends/request', authenticateToken, (req, res) => {
    targetFriends.pending_incoming.push(userId);
 
    saveFriends();
+   sendFriendUpdate(targetUser.id);
+   sendFriendUpdate(userId);
    res.json({ success: true, message: 'Arkadaşlık isteği gönderildi.' });
 });
 
@@ -730,6 +805,8 @@ app.post('/api/friends/accept', authenticateToken, (req, res) => {
    if (!targetFriends.friends.includes(userId)) targetFriends.friends.push(userId);
 
    saveFriends();
+   sendFriendUpdate(friendId);
+   sendFriendUpdate(userId);
    res.json({ success: true });
 });
 
@@ -749,6 +826,8 @@ app.post('/api/friends/reject', authenticateToken, (req, res) => {
    targetFriends.friends = targetFriends.friends.filter(id => id !== userId);
 
    saveFriends();
+   sendFriendUpdate(friendId);
+   sendFriendUpdate(userId);
    res.json({ success: true });
 });
 
@@ -774,6 +853,8 @@ app.post('/api/friends/dm', authenticateToken, (req, res) => {
       saveFriends();
    }
 
+   sendFriendUpdate(friendId);
+   sendFriendUpdate(userId);
    res.json({ success: true });
 });
 
@@ -897,6 +978,8 @@ io.on('connection', (socket) => {
       socket.userId = uId;
       socket.avatar = finalAvatar;
       socket.isAdmin = isAdmin;
+      
+      userSockets[uId] = socket.id;
 
       allTimeUsers[uId] = {
          username: finalUsername,
@@ -954,6 +1037,20 @@ io.on('connection', (socket) => {
          saveMessages();
 
          io.to('text-' + roomId).emit('create-message', message, socket.username, msgObj.id);
+
+         if (roomId.startsWith('dm_')) {
+            const parts = roomId.split('_');
+            const targetUserId = parts[1] === socket.userId ? parts[2] : parts[1];
+            const targetSocketId = userSockets[targetUserId];
+            if (targetSocketId) {
+               io.to(targetSocketId).emit('dm-received', {
+                  senderId: socket.userId,
+                  senderName: socket.username,
+                  message: message,
+                  roomId: roomId
+               });
+            }
+         }
       }
    });
 
@@ -1171,6 +1268,10 @@ io.on('connection', (socket) => {
       if (socket.voiceRoom && socket.peerId) {
          if (voiceRooms[socket.voiceRoom]) delete voiceRooms[socket.voiceRoom][socket.peerId];
          io.emit('voice-rooms-state', voiceRooms);
+      }
+
+      if (socket.userId && userSockets[socket.userId] === socket.id) {
+         delete userSockets[socket.userId];
       }
 
       if (socket.userId && allTimeUsers[socket.userId]) {
