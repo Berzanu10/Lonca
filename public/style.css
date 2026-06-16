@@ -1681,7 +1681,7 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
 }
 .call-participant-card.focused {
   grid-column: 1 / -1;
-  max-width: 960px;
+  max-width: 100%;
   width: 100%;
   aspect-ratio: 16 / 9;
 }

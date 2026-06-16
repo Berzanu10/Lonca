@@ -211,7 +211,8 @@ const micSVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentCol
 const headSVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c-4.97 0-9 4.03-9 9v7c0 1.1.9 2 2 2h4v-8H5v-1c0-3.87 3.13-7 7-7s7 3.13 7 7v1h-4v8h4c1.1 0 2-.9 2-2v-7c0-4.97-4.03-9-9-9z"/></svg>`;let isProfileModalForced = false;
 
 // ONAYLANAN GİRİŞ İŞLEMİNİ YÖNETEN YARDIMCI FONKSİYON
-function handleLoginSuccess(data) {
+let peerInitialized = false;
+function handleLoginSuccess(data, skipPeerInit) {
     myUsername = data.user.username;
     myUserId = data.user.id;
     myAvatar = data.user.avatar || '';
@@ -224,7 +225,7 @@ function handleLoginSuccess(data) {
     localStorage.setItem('bio', data.user.bio || '');
     setCookie('sessionToken', data.token, 30); // 30 gün çerezde sakla
 
-    displayMyUsername.textContent = myUsername;
+    if (displayMyUsername) displayMyUsername.textContent = myUsername;
     const myAv = document.getElementById('my-avatar');
     if (myAv) {
         if (myAvatar) {
@@ -245,7 +246,8 @@ function handleLoginSuccess(data) {
     if (data.isNewUser) {
         // İlk kez giriyorsa kullanıcı adı ve fotoğraf için modalı aç, sese/peere hemen bağlanma
         openProfileModal(true);
-    } else {
+    } else if (!skipPeerInit && !peerInitialized) {
+        peerInitialized = true;
         initializePeer();
     }
 }
@@ -301,18 +303,20 @@ if (kickedFromServerAlert === 'true') {
 
 // Oturum doğrulama kontrolü
 const sessionToken = localStorage.getItem('sessionToken') || getCookie('sessionToken');
-if (sessionToken) {
+if (sessionToken && sessionToken !== 'null' && sessionToken !== 'undefined') {
     if (!localStorage.getItem('sessionToken')) {
         localStorage.setItem('sessionToken', sessionToken);
     }
+
+    // Arayüzün boş görünmesini engellemek için yerel verileri hemen yükle
+    myUsername = localStorage.getItem('username') || '';
+    myUserId = localStorage.getItem('userId') || '';
+    myAvatar = localStorage.getItem('avatar') || '';
+    
+    // Ekranı hemen göster (sunucu cevabı beklenmeden)
     if (loginScreenWrapper) loginScreenWrapper.style.display = 'none';
     if (appContainer) appContainer.style.display = 'flex';
 
-    // Arayüzün boş görünmesini engellemek için yerel verileri yükleyelim
-    myUsername = localStorage.getItem('username');
-    myUserId = localStorage.getItem('userId');
-    myAvatar = localStorage.getItem('avatar') || '';
-    
     if (myUsername && displayMyUsername) {
         displayMyUsername.textContent = myUsername;
     }
@@ -329,24 +333,30 @@ if (sessionToken) {
             myAv.textContent = myUsername.charAt(0).toUpperCase();
         }
     }
-    if (myUserId) {
+    // Peer'i hemen başlat (sunucu doğrulaması beklemeden)
+    if (myUserId && !peerInitialized) {
+        peerInitialized = true;
         initializePeer();
     }
 
+    // Sunucudan güncel bilgileri al
     fetch('/api/auth/me', {
         headers: { 'Authorization': `Bearer ${sessionToken}` }
     })
     .then(r => r.json())
     .then(data => {
         if (data.success) {
-            handleLoginSuccess(data);
+            // skipPeerInit=true: peer zaten başlatıldı, tekrar başlatma
+            handleLoginSuccess(data, true);
         } else {
             clearSession();
             location.reload();
         }
     })
     .catch(() => {
-        // Sunucu hatası durumunda hemen atmayalım, internet kesintisi olabilir
+        // Sunucu erişilemez durumdaysa mevcut bilgilerle devam et
+        // (internet kesintisi olabilir, kullanıcıyı çıkartma)
+        console.warn('Sunucu/api/auth/me erişilemedi, önbellek bilgileriyle devam ediliyor.');
     });
 } else {
     showLoginScreen();
