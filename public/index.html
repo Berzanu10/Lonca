@@ -165,10 +165,10 @@
       </div>
 
       <!-- ORTA SIDEBAR (KANALLAR veya DM'LER) -->
-      <div class="sidebar">
+      <div class="sidebar" style="display: flex; flex-direction: column;">
 
          <!-- ANA SAYFA İÇERİĞİ -->
-         <div id="home-sidebar-content" style="display: flex; flex-direction: column; height: 100%; flex-grow: 1;">
+         <div id="home-sidebar-content" style="display: flex; flex-direction: column; flex-grow: 1; overflow: hidden;">
             <div class="sidebar-header"
                style="height: 48px; border-bottom: 1px solid rgba(0,0,0,0.15); display: flex; align-items: center; padding: 0 16px; flex-shrink: 0;">
                <h2 style="font-size: 0.9rem; color: #fff; font-weight: 700;">Ana Sayfa</h2>
@@ -249,8 +249,8 @@
             </div>
          </div>
 
-            <!-- ALT KONTROL PANELİ -->
-            <div class="user-bottom-panel" id="user-bottom-panel">
+         <!-- ALT KONTROL PANELİ -->
+         <div class="user-bottom-panel" id="user-bottom-panel">
                <div id="voice-connection-info"
                   style="display: none; align-items: center; justify-content: space-between;">
                   <div class="connection-left">
@@ -310,10 +310,11 @@
                      </button>
                   </div>
                </div>
-            </div>
-
          </div>
+
       </div>
+      <!-- /ORTA SIDEBAR -->
+
 
          <!-- ARKADAŞ LOBİSİ GÖRÜNÜMÜ -->
          <div id="friends-lobby-view" class="main-content" style="display: flex; flex-direction: column;">

@@ -18,6 +18,13 @@
       "timestamp": 1781556745870
     }
   ],
-  "serverChannel_server_default_genel": [],
+  "serverChannel_server_default_genel": [
+    {
+      "id": "msg_1781619491182_9eg0b",
+      "sender": "Berzan baba",
+      "text": "asd",
+      "timestamp": 1781619491182
+    }
+  ],
   "serverChannel_server_9rmrixru9_1781607494546_genel": []
 }
