@@ -1261,6 +1261,13 @@ io.on('connection', (socket) => {
       }
    });
 
+    socket.on('call-signal', ({ targetUserId, type, enabled }) => {
+       const targetSocketId = userSockets[targetUserId];
+       if (targetSocketId) {
+          io.to(targetSocketId).emit('call-signal', { senderId: socket.userId, type, enabled });
+       }
+    });
+
    socket.on('disconnect', () => {
       if (socket.textRoom && socket.peerId) {
          if (textRooms[socket.textRoom]) delete textRooms[socket.textRoom][socket.peerId];

@@ -262,6 +262,15 @@ function showLoginScreen() {
     if (appContainer) appContainer.style.display = 'none';
 }
 
+// Sunucudan atılma uyarısını reload sonrası gösterme
+const kickedFromServerAlert = localStorage.getItem('kickedFromServerAlert');
+if (kickedFromServerAlert === 'true') {
+    localStorage.removeItem('kickedFromServerAlert');
+    window.addEventListener('load', () => {
+        showCustomAlert("Sunucudan Atıldınız", "Yönetici tarafından sunucudan atıldınız!");
+    });
+}
+
 // Oturum doğrulama kontrolü
 const sessionToken = localStorage.getItem('sessionToken');
 if (sessionToken) {
@@ -1763,16 +1772,14 @@ socket.on('message-deleted', (msgId) => {
 });
 
 socket.on('kicked-from-voice', () => {
-    showCustomAlert("Sesten Atıldınız", "Bir yönetici tarafından sesli kanaldan atıldınız.", () => {
-        disconnectVoiceRoom();
-    });
+    disconnectVoiceRoom();
+    showCustomAlert("Sesten Atıldınız", "Bir yönetici tarafından sesli kanaldan atıldınız.");
 });
 
 socket.on('kicked-from-server', () => {
-    showCustomAlert("Sunucudan Atıldınız", "Yönetici tarafından sunucudan atıldınız!", () => {
-        clearSession();
-        location.reload();
-    });
+    localStorage.setItem('kickedFromServerAlert', 'true');
+    clearSession();
+    location.reload();
 });
 
 socket.on('message-pinned-status', (msgId, isPinned) => {
