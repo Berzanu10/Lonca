@@ -51,6 +51,15 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(express.static('public'));
 
+const userSockets = {}; // userId -> socketId
+
+function sendFriendUpdate(targetUserId) {
+   const socketId = userSockets[targetUserId];
+   if (socketId) {
+      io.to(socketId).emit('friend-update');
+   }
+}
+
 const crypto = require('crypto');
 
 // USERS FILE DATABASE
@@ -166,6 +175,7 @@ app.get('/api/auth/me', (req, res) => {
          username: user.username,
          email: user.email,
          avatar: user.avatar || '',
+         bio: user.bio || '',
          isAdmin: user.isAdmin
       }
    });
@@ -471,7 +481,7 @@ app.post('/api/auth/reset-password', (req, res) => {
 
 // PROFILE UPDATE ENDPOINT
 app.post('/api/users/profile', authenticateToken, (req, res) => {
-   const { username, avatar, oldPassword, newPassword } = req.body;
+   const { username, avatar, oldPassword, newPassword, bio } = req.body;
    const userId = req.user.userId;
 
    const user = usersDb[userId];
@@ -500,6 +510,10 @@ app.post('/api/users/profile', authenticateToken, (req, res) => {
       user.avatar = avatar;
    }
 
+   if (bio !== undefined) {
+      user.bio = bio;
+   }
+
    saveUsers();
 
    res.json({
@@ -509,7 +523,24 @@ app.post('/api/users/profile', authenticateToken, (req, res) => {
          username: user.username,
          email: user.email,
          avatar: user.avatar || '',
+         bio: user.bio || '',
          isAdmin: user.isAdmin
+      }
+   });
+});
+
+// GET USER BY ID
+app.get('/api/users/:userId', authenticateToken, (req, res) => {
+   const { userId } = req.params;
+   const user = usersDb[userId];
+   if (!user) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+   res.json({
+      success: true,
+      user: {
+         id: user.id,
+         username: user.username,
+         avatar: user.avatar || '',
+         bio: user.bio || ''
       }
    });
 });
