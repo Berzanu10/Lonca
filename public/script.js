@@ -222,6 +222,7 @@ function handleLoginSuccess(data) {
     localStorage.setItem('userId', myUserId);
     localStorage.setItem('avatar', myAvatar);
     localStorage.setItem('bio', data.user.bio || '');
+    setCookie('sessionToken', data.token, 30); // 30 gün çerezde sakla
 
     displayMyUsername.textContent = myUsername;
     const myAv = document.getElementById('my-avatar');
@@ -249,12 +250,39 @@ function handleLoginSuccess(data) {
     }
 }
 
+// Çerez yardımcı fonksiyonları
+function setCookie(name, value, days) {
+    let expires = "";
+    if (days) {
+        let date = new Date();
+        date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+        expires = "; expires=" + date.toUTCString();
+    }
+    document.cookie = name + "=" + (value || "")  + expires + "; path=/";
+}
+
+function getCookie(name) {
+    let nameEQ = name + "=";
+    let ca = document.cookie.split(';');
+    for(let i=0;i < ca.length;i++) {
+        let c = ca[i];
+        while (c.charAt(0)==' ') c = c.substring(1,c.length);
+        if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length,c.length);
+    }
+    return null;
+}
+
+function eraseCookie(name) {   
+    document.cookie = name+'=; Max-Age=-99999999; path=/';  
+}
+
 function clearSession() {
     localStorage.removeItem('sessionToken');
     localStorage.removeItem('username');
     localStorage.removeItem('userId');
     localStorage.removeItem('avatar');
     localStorage.removeItem('bio');
+    eraseCookie('sessionToken');
 }
 
 function showLoginScreen() {
@@ -272,9 +300,39 @@ if (kickedFromServerAlert === 'true') {
 }
 
 // Oturum doğrulama kontrolü
-const sessionToken = localStorage.getItem('sessionToken');
+const sessionToken = localStorage.getItem('sessionToken') || getCookie('sessionToken');
 if (sessionToken) {
+    if (!localStorage.getItem('sessionToken')) {
+        localStorage.setItem('sessionToken', sessionToken);
+    }
     if (loginScreenWrapper) loginScreenWrapper.style.display = 'none';
+    if (appContainer) appContainer.style.display = 'flex';
+
+    // Arayüzün boş görünmesini engellemek için yerel verileri yükleyelim
+    myUsername = localStorage.getItem('username');
+    myUserId = localStorage.getItem('userId');
+    myAvatar = localStorage.getItem('avatar') || '';
+    
+    if (myUsername && displayMyUsername) {
+        displayMyUsername.textContent = myUsername;
+    }
+    const myAv = document.getElementById('my-avatar');
+    if (myAv && myUsername) {
+        if (myAvatar) {
+            myAv.style.backgroundImage = `url(${myAvatar})`;
+            myAv.style.backgroundSize = 'cover';
+            myAv.style.color = 'transparent';
+            myAv.textContent = '';
+        } else {
+            myAv.style.backgroundImage = '';
+            myAv.style.color = '';
+            myAv.textContent = myUsername.charAt(0).toUpperCase();
+        }
+    }
+    if (myUserId) {
+        initializePeer();
+    }
+
     fetch('/api/auth/me', {
         headers: { 'Authorization': `Bearer ${sessionToken}` }
     })
@@ -284,12 +342,11 @@ if (sessionToken) {
             handleLoginSuccess(data);
         } else {
             clearSession();
-            showLoginScreen();
+            location.reload();
         }
     })
     .catch(() => {
-        clearSession();
-        showLoginScreen();
+        // Sunucu hatası durumunda hemen atmayalım, internet kesintisi olabilir
     });
 } else {
     showLoginScreen();

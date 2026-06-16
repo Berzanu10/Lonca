@@ -318,12 +318,12 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
 /* ALT KANAL PANELİ (Voice Connected ve Kontroller) */
 .user-bottom-panel { background-color: #292b2f; flex-shrink: 0; width: 100%; }
 
-#voice-connection-info { display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.8rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
-.connection-left { display: flex; align-items: center; }
+#voice-connection-info { display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.8rem; border-bottom: 1px solid rgba(255,255,255,0.05); overflow: hidden; }
+.connection-left { display: flex; align-items: center; min-width: 0; flex: 1; margin-right: 8px; }
 .signal-icon { margin-right: 8px; flex-shrink: 0; }
-.voice-text { display: flex; flex-direction: column; }
-.status-title { color: #43b581; font-size: 0.75rem; font-weight: 700; margin-bottom:2px;}
-.status-room { color: #b9bbbe; font-size: 0.75rem; }
+.voice-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.status-title { color: #43b581; font-size: 0.75rem; font-weight: 700; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.status-room { color: #b9bbbe; font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .user-controls-bar { display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.8rem;}
 .current-user-info { display: flex; align-items: center; cursor: pointer; padding: 4px; border-radius: 4px; overflow: hidden; }
@@ -400,13 +400,207 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
 .danger-btn { background: var(--danger-color); color: white; border: none; padding: 0.8rem; border-radius: 4px; cursor: pointer; font-weight: bold; }
 @keyframes fadein { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
 
-/* VİDEO MODALI */
-#video-modal { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.85); display: flex; justify-content: center; align-items: center; z-index: 1000; }
-.video-modal-content { background: var(--panel-color); padding: 1.5rem; border-radius: 8px; width: 90%; max-width: 1000px; display: flex; flex-direction: column; gap: 1.5rem; box-shadow: 0 10px 40px rgba(0,0,0,0.9); }
-#video-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
-.video-wrapper { position: relative; width: 100%; padding-bottom: 75%; background:#000; border-radius:8px; overflow:hidden; }
-.video-wrapper video { position: absolute; top:0; left:0; width:100%; height:100%; object-fit: cover; }
-.video-label { position: absolute; bottom: 8px; left: 8px; background: rgba(0,0,0,0.7); padding: 4px 10px; border-radius: 4px; font-weight: bold; }
+/* VİDEO MODALI (Discord Stili) */
+#video-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(15, 15, 18, 0.95);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1700;
+}
+
+.video-modal-content {
+  width: 90%;
+  max-width: 1100px;
+  height: 85vh;
+  background: #111214;
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.video-modal-header {
+  padding: 16px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #111214;
+}
+
+.video-modal-title {
+  color: #fff;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.call-participants-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+  padding: 24px;
+  background: #1e1f22;
+  align-content: center;
+  justify-items: center;
+  overflow-y: auto;
+}
+
+.call-participant-card {
+  width: 100%;
+  max-width: 480px;
+  aspect-ratio: 16 / 9;
+  background: #111214;
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+  border: 2px solid transparent;
+}
+
+.call-participant-card.speaking {
+  border-color: #23a55a;
+  box-shadow: 0 0 12px rgba(35, 165, 90, 0.4);
+}
+
+.call-participant-card video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.call-participant-avatar-view {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #111214;
+  z-index: 2;
+}
+
+.call-participant-avatar-circle {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background-color: var(--highlight-color);
+  background-size: cover;
+  background-position: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 12px;
+  border: 3px solid transparent;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.call-participant-card.speaking .call-participant-avatar-circle {
+  border-color: #23a55a;
+  transform: scale(1.05);
+}
+
+.call-participant-name-tag {
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.call-participant-card .call-participant-name-tag-absolute {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  z-index: 5;
+}
+
+.video-controls-bar {
+  padding: 16px;
+  background: #111214;
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  z-index: 10;
+}
+
+.control-btn {
+  background: #2b2d31;
+  border: none;
+  color: #dbdee1;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+.control-btn:hover {
+  background: #35373c;
+  color: #fff;
+}
+
+.control-btn:active {
+  transform: scale(0.95);
+}
+
+.control-btn.active {
+  background: #fff;
+  color: #111214;
+}
+
+.control-btn.active:hover {
+  background: #e3e5e8;
+}
+
+.control-btn.hangup {
+  background: #da373c;
+  color: #fff;
+}
+
+.control-btn.hangup:hover {
+  background: #a92b2f;
+}
+
+#screen-watch-wrapper:hover .screen-watch-controls {
+  opacity: 1 !important;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
 
 /* ----------------------------------
    MOBİL (TELEFON) UYUMLULUĞU
