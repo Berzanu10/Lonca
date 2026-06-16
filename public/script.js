@@ -14,7 +14,7 @@ let joinedServers = [];
 let activeServerId = 'home';
 let activeDMUserId = null;
 let friendsData = { friends: [], pending_incoming: [], pending_outgoing: [], dms: [] };
-let activeFriendsTab = 'online';
+let activeFriendsTab = 'all';
 
 let currentTextRoom = 'genel';
 let currentVoiceRoom = null;
@@ -900,6 +900,7 @@ if (profileSaveBtn) {
 }
 
 function initializePeer() {
+    if (peer) return;
     peer = new Peer(undefined, { path: '/peerjs', host: '/', port: location.port || (location.protocol === 'https:' ? 443 : 80) });
 
     peer.on('open', id => {
@@ -964,13 +965,21 @@ function initializePeer() {
             incomingModal.style.display = 'none';
             disconnectVoiceRoom();
             try {
-                if (!localVideoStream) localVideoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                await obtainLocalStream();
                 call.answer(localVideoStream);
                 privateCall = call;
-                openVideoModal(); addVideoStream(localVideoStream, 'local', 'Sen');
-                call.on('stream', userStream => addVideoStream(userStream, call.peer, callerName));
+                openVideoModal(); 
+                addVideoStream(localVideoStream, 'local', 'Sen');
+                monitorSpeech(localVideoStream, myPeerId);
+                
+                call.on('stream', userStream => {
+                    addVideoStream(userStream, call.peer, callerName);
+                    monitorSpeech(userStream, call.peer);
+                });
                 call.on('close', () => endPrivateCall());
-            } catch (err) { showCustomAlert("Hata", "Kameraya/Mikrofona erişim sağlanamadı: " + err.message); }
+            } catch (err) { 
+                showCustomAlert("Hata", "Kameraya/Mikrofona erişim sağlanamadı: " + err.message); 
+            }
         };
 
         rejectBtn.onclick = () => {
@@ -1459,7 +1468,19 @@ async function connectVoiceRoom(room) {
     if (targetEl) targetEl.classList.add('active');
 
     voiceConnectionInfo.style.display = 'flex';
-    activeVoiceRoomName.textContent = `"${room}" / Lonca Sunucusu`;
+    let cleanRoomName = room;
+    let cleanServerName = 'Lonca Sunucusu';
+    if (room.startsWith('serverVoice_')) {
+        const parts = room.split('_');
+        const sId = parts[1];
+        const cName = parts.slice(2).join('_');
+        cleanRoomName = cName;
+        const serverObj = joinedServers.find(s => s.id === sId);
+        if (serverObj) {
+            cleanServerName = serverObj.name;
+        }
+    }
+    activeVoiceRoomName.textContent = `"${cleanRoomName}" / ${cleanServerName}`;
     socket.emit('join-voice-room', room);
 
     // Sunucuya state durumlarımızı hızla güncelletelim ki eksik kalmasın (Undefined Name & Missing State Çözümü)
@@ -1670,26 +1691,263 @@ function checkSpeechLooped() {
             if (average > 10) circle.classList.add('speaking');
             else circle.classList.remove('speaking');
         }
+
+        const callCard = document.getElementById(id === myPeerId ? 'wrapper-local' : 'wrapper-' + id);
+        if (callCard) {
+            if (average > 10) callCard.classList.add('speaking');
+            else callCard.classList.remove('speaking');
+        }
     }
 }
 
 // -----------------------------------------
 // VİDEO MODAL
 // -----------------------------------------
-function openVideoModal() { document.getElementById('video-modal').style.display = 'flex'; }
-function endPrivateCall() {
-    if (privateCall) { privateCall.close(); privateCall = null; }
-    if (localVideoStream) { localVideoStream.getTracks().forEach(t => t.stop()); localVideoStream = null; }
-    document.getElementById('video-grid').innerHTML = ''; document.getElementById('video-modal').style.display = 'none';
+function openVideoModal() { 
+    document.getElementById('video-modal').style.display = 'flex'; 
 }
+
+let isCallMicMuted = false;
+let isCallCameraOn = false;
+let isCallScreenSharing = false;
+let callScreenStream = null;
+
+async function obtainLocalStream() {
+    if (!localVideoStream) {
+        localVideoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        localVideoStream.getVideoTracks().forEach(t => t.enabled = false);
+        isCallCameraOn = false;
+        isCallMicMuted = false;
+        localVideoStream.getAudioTracks().forEach(t => t.enabled = true);
+    }
+    return localVideoStream;
+}
+
+function toggleCallMic() {
+    if (!localVideoStream) return;
+    const audioTrack = localVideoStream.getAudioTracks()[0];
+    if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        isCallMicMuted = !audioTrack.enabled;
+        const btn = document.getElementById('call-toggle-mic');
+        if (btn) {
+            btn.classList.toggle('active', isCallMicMuted);
+            btn.title = isCallMicMuted ? "Mikrofonu Aç" : "Mikrofonu Kapat";
+            btn.innerHTML = isCallMicMuted 
+                ? `<svg width="20" height="20" viewBox="0 0 24 24" fill="#ed4245"><path d="M19 10h-1.7c0 .72-.1 1.41-.27 2.07l1.24 1.24c.45-.98.73-2.07.73-3.31zM12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-7-3h2c0 2.76 2.24 5 5 5 .51 0 1-.09 1.46-.24l1.49 1.49C13.97 17.74 13.01 18 12 18c-3.39 0-6-2.61-6-6H5v-1zm14.28 11.22l-1.42-1.42L5.22 8.16 3.8 6.74 2.38 8.16l2.36 2.36C4.27 11.13 4 11.83 4 12.58h2c0-.58.12-1.12.33-1.63L13 17.58V21h2v-3.08c1.32-.19 2.5-.8 3.48-1.66l2.38 2.38 1.42-1.42z"/></svg>`
+                : `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>`;
+        }
+    }
+}
+
+function toggleCallCamera() {
+    if (!localVideoStream) return;
+    const videoTrack = localVideoStream.getVideoTracks()[0];
+    if (videoTrack) {
+        videoTrack.enabled = !videoTrack.enabled;
+        isCallCameraOn = videoTrack.enabled;
+        
+        const localAvatarView = document.getElementById('avatar-view-local');
+        if (localAvatarView) {
+            localAvatarView.style.display = isCallCameraOn ? 'none' : 'flex';
+        }
+        
+        const btn = document.getElementById('call-toggle-camera');
+        if (btn) {
+            btn.classList.toggle('active', isCallCameraOn);
+            btn.title = isCallCameraOn ? "Kamerayı Kapat" : "Kamerayı Aç";
+        }
+        
+        if (privateCall) {
+            socket.emit('call-signal', {
+                targetPeerId: privateCall.peer,
+                type: 'camera-state',
+                enabled: isCallCameraOn
+            });
+        }
+    }
+}
+
+async function toggleCallScreen() {
+    const localVideo = document.getElementById('wrapper-local')?.querySelector('video');
+    if (!privateCall || !localVideoStream) return;
+    
+    const rtcPeerConnection = privateCall.peerConnection;
+    if (!rtcPeerConnection) return;
+    const senders = rtcPeerConnection.getSenders();
+    const sender = senders.find(s => s.track && s.track.kind === 'video');
+    
+    if (!isCallScreenSharing) {
+        try {
+            callScreenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+            isCallScreenSharing = true;
+            
+            document.getElementById('call-toggle-screen').classList.add('active');
+            
+            const screenTrack = callScreenStream.getVideoTracks()[0];
+            if (sender && screenTrack) {
+                sender.replaceTrack(screenTrack);
+            }
+            if (localVideo) {
+                localVideo.srcObject = callScreenStream;
+            }
+            
+            const localAvatarView = document.getElementById('avatar-view-local');
+            if (localAvatarView) localAvatarView.style.display = 'none';
+            
+            socket.emit('call-signal', {
+                targetPeerId: privateCall.peer,
+                type: 'camera-state',
+                enabled: true
+            });
+            
+            screenTrack.onended = () => {
+                stopCallScreenSharing();
+            };
+        } catch (err) {
+            console.error("Screen share error in call:", err);
+        }
+    } else {
+        stopCallScreenSharing();
+    }
+}
+
+function stopCallScreenSharing() {
+    if (!isCallScreenSharing) return;
+    isCallScreenSharing = false;
+    
+    if (callScreenStream) {
+        callScreenStream.getTracks().forEach(t => t.stop());
+        callScreenStream = null;
+    }
+    
+    document.getElementById('call-toggle-screen').classList.remove('active');
+    
+    const localVideo = document.getElementById('wrapper-local')?.querySelector('video');
+    const rtcPeerConnection = privateCall?.peerConnection;
+    if (rtcPeerConnection) {
+        const senders = rtcPeerConnection.getSenders();
+        const sender = senders.find(s => s.track && s.track.kind === 'video');
+        const cameraTrack = localVideoStream.getVideoTracks()[0];
+        if (sender && cameraTrack) {
+            sender.replaceTrack(cameraTrack);
+        }
+    }
+    
+    if (localVideo) {
+        localVideo.srcObject = localVideoStream;
+    }
+    
+    const localAvatarView = document.getElementById('avatar-view-local');
+    if (localAvatarView) {
+        localAvatarView.style.display = isCallCameraOn ? 'none' : 'flex';
+    }
+    
+    if (privateCall) {
+        socket.emit('call-signal', {
+            targetPeerId: privateCall.peer,
+            type: 'camera-state',
+            enabled: isCallCameraOn
+        });
+    }
+}
+
+function endPrivateCall() {
+    stopCallScreenSharing();
+    if (privateCall) { 
+        stopMonitor(privateCall.peer);
+        privateCall.close(); 
+        privateCall = null; 
+    }
+    stopMonitor(myPeerId);
+    if (localVideoStream) { 
+        localVideoStream.getTracks().forEach(t => t.stop()); 
+        localVideoStream = null; 
+    }
+    
+    document.getElementById('video-grid').innerHTML = ''; 
+    document.getElementById('video-modal').style.display = 'none';
+    isCallMicMuted = false;
+    isCallCameraOn = false;
+    
+    const cameraBtn = document.getElementById('call-toggle-camera');
+    const micBtn = document.getElementById('call-toggle-mic');
+    const screenBtn = document.getElementById('call-toggle-screen');
+    if (cameraBtn) cameraBtn.classList.remove('active');
+    if (micBtn) micBtn.classList.remove('active');
+    if (screenBtn) screenBtn.classList.remove('active');
+}
+
 document.getElementById('hangup-btn').addEventListener('click', endPrivateCall);
+
+const callToggleMicBtn = document.getElementById('call-toggle-mic');
+if (callToggleMicBtn) callToggleMicBtn.addEventListener('click', toggleCallMic);
+
+const callToggleCameraBtn = document.getElementById('call-toggle-camera');
+if (callToggleCameraBtn) callToggleCameraBtn.addEventListener('click', toggleCallCamera);
+
+const callToggleScreenBtn = document.getElementById('call-toggle-screen');
+if (callToggleScreenBtn) callToggleScreenBtn.addEventListener('click', toggleCallScreen);
+
 function addVideoStream(stream, peerId, username) {
     if (document.getElementById(`wrapper-${peerId}`)) return;
-    const cw = document.createElement('div'); cw.id = `wrapper-${peerId}`; cw.className = 'video-wrapper';
-    const v = document.createElement('video'); v.srcObject = stream; v.autoplay = true; v.playsInline = true;
-    if (peerId === 'local') { v.muted = true; v.style.transform = 'scaleX(-1)'; }
-    const l = document.createElement('span'); l.className = 'video-label'; l.textContent = username;
-    cw.appendChild(v); cw.appendChild(l); document.getElementById('video-grid').appendChild(cw);
+    
+    const card = document.createElement('div');
+    card.id = `wrapper-${peerId}`;
+    card.className = 'call-participant-card';
+    
+    const v = document.createElement('video');
+    v.srcObject = stream;
+    v.autoplay = true;
+    v.playsInline = true;
+    if (peerId === 'local') {
+        v.muted = true;
+        v.style.transform = 'scaleX(-1)';
+    }
+    
+    const avatarView = document.createElement('div');
+    avatarView.id = `avatar-view-${peerId}`;
+    avatarView.className = 'call-participant-avatar-view';
+    
+    const avatarCircle = document.createElement('div');
+    avatarCircle.className = 'call-participant-avatar-circle';
+    
+    let userAvatarUrl = '';
+    if (peerId === 'local') {
+        userAvatarUrl = myAvatar;
+    } else {
+        const userId = Object.keys(allUsersList).find(uid => allUsersList[uid].peerId === peerId);
+        if (userId && allUsersList[userId]) {
+            userAvatarUrl = allUsersList[userId].avatar || '';
+        }
+    }
+    
+    if (userAvatarUrl) {
+        avatarCircle.style.backgroundImage = `url(${userAvatarUrl})`;
+    } else {
+        avatarCircle.textContent = username.charAt(0).toUpperCase();
+    }
+    
+    const nameLabel = document.createElement('div');
+    nameLabel.className = 'call-participant-name-tag';
+    nameLabel.textContent = username;
+    
+    avatarView.appendChild(avatarCircle);
+    avatarView.appendChild(nameLabel);
+    
+    const absLabel = document.createElement('div');
+    absLabel.className = 'call-participant-name-tag-absolute';
+    absLabel.textContent = username;
+    
+    card.appendChild(v);
+    card.appendChild(avatarView);
+    card.appendChild(absLabel);
+    
+    document.getElementById('video-grid').appendChild(card);
+    
+    const videoTrack = stream.getVideoTracks()[0];
+    const isVideoEnabled = videoTrack && videoTrack.enabled;
+    avatarView.style.display = isVideoEnabled ? 'none' : 'flex';
 }
 
 // -----------------------------------------
@@ -1839,6 +2097,15 @@ socket.on('kicked-from-server', () => {
     location.reload();
 });
 
+socket.on('call-signal', ({ fromPeerId, type, enabled }) => {
+    if (type === 'camera-state') {
+        const remoteAvatarView = document.getElementById(`avatar-view-${fromPeerId}`);
+        if (remoteAvatarView) {
+            remoteAvatarView.style.display = enabled ? 'none' : 'flex';
+        }
+    }
+});
+
 socket.on('message-pinned-status', (msgId, isPinned) => {
     const msg = activeRoomMessages.find(m => m.id === msgId);
     if (msg) {
@@ -1948,10 +2215,15 @@ socket.on('screen-share-requested', ({ requesterPeerId }) => {
 });
 
 // Screen Share Helper Functions
+// Screen Share Helper Functions
 function stopScreenSharing() {
     if (localScreenStream) {
         localScreenStream.getTracks().forEach(t => t.stop());
         localScreenStream = null;
+    }
+    const modal = document.getElementById('screen-watch-modal');
+    if (modal && modal.style.display === 'flex' && modal.dataset.watchingPeerId === myPeerId) {
+        closeScreenWatchModal();
     }
     for (let pId in screenShareCalls) {
         screenShareCalls[pId].close();
@@ -1966,25 +2238,41 @@ function watchScreenShare(peerId, username) {
     const modal = document.getElementById('screen-watch-modal');
     const video = document.getElementById('screen-watch-video');
     const title = document.getElementById('screen-watch-title').querySelector('span');
+    const loadingIndicator = document.getElementById('screen-watch-loading');
     
     title.textContent = `📺 ${username} adlı kişinin yayını izleniyor`;
     modal.dataset.watchingPeerId = peerId;
+    modal.style.display = 'flex';
     
     if (screenShareStreams[peerId]) {
         video.srcObject = screenShareStreams[peerId];
-        modal.style.display = 'flex';
+        if (loadingIndicator) loadingIndicator.style.display = 'none';
     } else {
+        if (loadingIndicator) {
+            loadingIndicator.style.display = 'flex';
+            const textEl = loadingIndicator.querySelector('span');
+            if (textEl) textEl.textContent = "Yayın akışına bağlanılıyor...";
+            const spinner = loadingIndicator.querySelector('div');
+            if (spinner) spinner.style.display = 'block';
+        }
         socket.emit('request-screen-share-stream', { targetPeerId: peerId, requesterPeerId: myPeerId });
-        showCustomAlert("Bağlantı Kuruluyor", "Yayın akışı talep edildi, bağlanıyor...", () => {
-            setTimeout(() => {
+        
+        // Timeout if stream never arrives
+        setTimeout(() => {
+            if (modal.style.display === 'flex' && modal.dataset.watchingPeerId === peerId) {
                 if (screenShareStreams[peerId]) {
                     video.srcObject = screenShareStreams[peerId];
-                    modal.style.display = 'flex';
+                    if (loadingIndicator) loadingIndicator.style.display = 'none';
                 } else {
-                    showCustomAlert("Hata", "Yayın akışı alınamadı. Yayıncı yayını kapatmış olabilir.");
+                    if (loadingIndicator) {
+                        const textEl = loadingIndicator.querySelector('span');
+                        if (textEl) textEl.textContent = "Hata: Yayın akışı alınamadı.";
+                        const spinner = loadingIndicator.querySelector('div');
+                        if (spinner) spinner.style.display = 'none';
+                    }
                 }
-            }, 1500);
-        });
+            }
+        }, 3000);
     }
 }
 
@@ -1996,10 +2284,49 @@ function closeScreenWatchModal() {
     delete modal.dataset.watchingPeerId;
 }
 
-// Bind close button
+// Bind close & overlay controls buttons
 const screenWatchCloseBtn = document.getElementById('screen-watch-close-btn');
 if (screenWatchCloseBtn) {
     screenWatchCloseBtn.addEventListener('click', closeScreenWatchModal);
+}
+
+const screenWatchStopBtn = document.getElementById('screen-watch-stop-btn');
+if (screenWatchStopBtn) {
+    screenWatchStopBtn.addEventListener('click', closeScreenWatchModal);
+}
+
+const screenWatchFullscreenBtn = document.getElementById('screen-watch-fullscreen-btn');
+if (screenWatchFullscreenBtn) {
+    screenWatchFullscreenBtn.addEventListener('click', () => {
+        const video = document.getElementById('screen-watch-video');
+        if (video) {
+            if (video.requestFullscreen) {
+                video.requestFullscreen();
+            } else if (video.webkitRequestFullscreen) {
+                video.webkitRequestFullscreen();
+            } else if (video.msRequestFullscreen) {
+                video.msRequestFullscreen();
+            }
+        }
+    });
+}
+
+const screenWatchPipBtn = document.getElementById('screen-watch-pip-btn');
+if (screenWatchPipBtn) {
+    screenWatchPipBtn.addEventListener('click', async () => {
+        const video = document.getElementById('screen-watch-video');
+        if (video && document.pictureInPictureEnabled) {
+            try {
+                if (document.pictureInPictureElement) {
+                    await document.exitPictureInPicture();
+                } else {
+                    await video.requestPictureInPicture();
+                }
+            } catch (err) {
+                console.error("PiP hatası:", err);
+            }
+        }
+    });
 }
 
 // Bind start/cancel settings buttons
@@ -2053,6 +2380,18 @@ if (screenShareStartBtn) {
             localScreenStream = await navigator.mediaDevices.getDisplayMedia(constraints);
             if (bottomShareScreenBtn) bottomShareScreenBtn.classList.add('strikethrough-icon');
             socket.emit('start-screen-share');
+
+            // Open watch modal showing own screen share stream
+            const modal = document.getElementById('screen-watch-modal');
+            const video = document.getElementById('screen-watch-video');
+            const title = document.getElementById('screen-watch-title').querySelector('span');
+            const loadingIndicator = document.getElementById('screen-watch-loading');
+
+            title.textContent = `📺 Kendi yayınınız izleniyor`;
+            modal.dataset.watchingPeerId = myPeerId;
+            video.srcObject = localScreenStream;
+            if (loadingIndicator) loadingIndicator.style.display = 'none';
+            modal.style.display = 'flex';
             
             for (let peerId in voiceCalls) {
                 const call = peer.call(peerId, localScreenStream, { metadata: { type: 'screen-share' } });
@@ -2180,7 +2519,7 @@ function selectServer(serverId) {
             chatContentView.style.display = 'none';
             document.getElementById('friends-tab-btn').classList.add('active');
             document.querySelectorAll('.dm-conversations-item').forEach(item => item.classList.remove('active'));
-            switchFriendsTab('online');
+            switchFriendsTab('all');
         }
     } else {
         homeSidebarContent.style.display = 'none';
@@ -2544,9 +2883,7 @@ async function initiatePrivateCall(targetPeerId, targetUsername) {
     disconnectVoiceRoom();
 
     try {
-        if (!localVideoStream) {
-            localVideoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        }
+        await obtainLocalStream();
         
         const call = peer.call(targetPeerId, localVideoStream, {
             metadata: { type: 'private-call' }
@@ -2555,9 +2892,11 @@ async function initiatePrivateCall(targetPeerId, targetUsername) {
         privateCall = call;
         openVideoModal();
         addVideoStream(localVideoStream, 'local', 'Sen');
+        monitorSpeech(localVideoStream, myPeerId);
         
         call.on('stream', userStream => {
             addVideoStream(userStream, call.peer, targetUsername);
+            monitorSpeech(userStream, call.peer);
         });
         
         call.on('close', () => {
@@ -2676,13 +3015,24 @@ function renderFriendsList() {
     let list = [];
     if (activeFriendsTab === 'online') {
         list = friendsData.friends.filter(f => allUsersList[f.id]?.isOnline === true);
+        list.sort((a, b) => a.username.localeCompare(b.username));
     } else if (activeFriendsTab === 'all') {
-        list = friendsData.friends;
+        list = [...friendsData.friends];
+        // Aktifler üstte olacak şekilde, sonrasında alfabetik sıralayalım
+        list.sort((a, b) => {
+            const aOnline = allUsersList[a.id]?.isOnline === true ? 1 : 0;
+            const bOnline = allUsersList[b.id]?.isOnline === true ? 1 : 0;
+            if (aOnline !== bOnline) {
+                return bOnline - aOnline;
+            }
+            return a.username.localeCompare(b.username);
+        });
     } else if (activeFriendsTab === 'pending') {
         list = [
             ...friendsData.pending_incoming.map(f => ({ ...f, type: 'incoming' })),
             ...friendsData.pending_outgoing.map(f => ({ ...f, type: 'outgoing' }))
         ];
+        list.sort((a, b) => a.username.localeCompare(b.username));
     }
 
     if (list.length === 0) {
@@ -2789,6 +3139,22 @@ function renderFriendsList() {
                 });
             };
 
+            // Call button
+            const callBtn = document.createElement('button');
+            callBtn.className = 'friend-action-btn';
+            callBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56a.977.977 0 00-1.01.24l-2.2 2.2a15.045 15.045 0 01-6.59-6.59l2.2-2.2c.28-.28.36-.67.25-1.02C8.79 6.33 8.6 5.14 8.6 3.91c0-.53-.43-.96-.96-.96H4.12c-.53 0-.96.43-.96.96 0 9.77 7.93 17.7 17.7 17.7.53 0 .96-.43.96-.96v-3.52c0-.53-.43-.96-.96-.96z"/></svg>`;
+            
+            const targetPeerId = allUsersList[friend.id]?.peerId;
+            if (isOnline && targetPeerId) {
+                callBtn.title = 'Sesli Arama Başlat';
+                callBtn.onclick = () => initiatePrivateCall(targetPeerId, friend.username);
+            } else {
+                callBtn.disabled = true;
+                callBtn.style.opacity = '0.35';
+                callBtn.style.cursor = 'not-allowed';
+                callBtn.title = 'Kullanıcı çevrimdışı veya aranamıyor';
+            }
+
             // Remove friend button
             const removeBtn = document.createElement('button');
             removeBtn.className = 'friend-action-btn reject';
@@ -2801,6 +3167,7 @@ function renderFriendsList() {
             };
 
             actions.appendChild(msgBtn);
+            actions.appendChild(callBtn);
             actions.appendChild(removeBtn);
         }
 

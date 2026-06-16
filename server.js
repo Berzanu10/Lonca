@@ -1261,10 +1261,21 @@ io.on('connection', (socket) => {
       }
    });
 
-    socket.on('call-signal', ({ targetUserId, type, enabled }) => {
-       const targetSocketId = userSockets[targetUserId];
-       if (targetSocketId) {
-          io.to(targetSocketId).emit('call-signal', { senderId: socket.userId, type, enabled });
+    socket.on('call-signal', ({ targetUserId, targetPeerId, type, enabled }) => {
+       let targetSocket = null;
+       if (targetUserId) {
+          const socketId = userSockets[targetUserId];
+          if (socketId) targetSocket = io.sockets.sockets.get(socketId);
+       } else if (targetPeerId) {
+          targetSocket = [...io.sockets.sockets.values()].find(s => s.peerId === targetPeerId);
+       }
+       if (targetSocket) {
+          targetSocket.emit('call-signal', { 
+             fromPeerId: socket.peerId, 
+             senderId: socket.userId, 
+             type, 
+             enabled 
+          });
        }
     });
 
