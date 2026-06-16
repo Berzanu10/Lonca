@@ -1195,3 +1195,228 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
   box-shadow: 0 0 10px rgba(237, 66, 69, 0.5) !important;
 }
 
+/* SUNUCU GEZİNTİ BARI (EN SOL) */
+.server-sidebar {
+  width: 72px;
+  background-color: #1e1f22;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.server-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background-color: #313338;
+  color: #dbdee1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.15rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+  overflow: hidden;
+  position: relative;
+  user-select: none;
+}
+
+.server-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: border-radius 0.2s;
+}
+
+.server-icon:hover,
+.server-icon.active {
+  border-radius: 16px;
+  background-color: var(--highlight-color);
+  color: #fff;
+}
+
+.server-icon.add-server-btn {
+  color: #23a55a;
+}
+.server-icon.add-server-btn:hover {
+  background-color: #23a55a;
+  color: #fff;
+}
+
+.server-separator {
+  width: 32px;
+  height: 2px;
+  background-color: #35363c;
+  border-radius: 1px;
+  margin: 4px 0;
+}
+
+/* ARKADAŞ LOBİSİ VE TAB BUTONLARI */
+.tab-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  padding: 6px 12px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  outline: none;
+}
+
+.tab-btn:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: #dbdee1;
+}
+
+.tab-btn.active {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.tab-btn.green {
+  background-color: #248046;
+  color: #fff;
+}
+
+.tab-btn.green:hover {
+  background-color: #1a6535;
+}
+
+/* ARKADAŞ SATIRI KARTI */
+.friends-list-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.friend-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background-color: #2b2d31;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.friend-row:hover {
+  background-color: #313338;
+  border-color: rgba(255, 255, 255, 0.05);
+}
+
+.friend-info {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.friend-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background-color: var(--highlight-color);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 1.1rem;
+  margin-right: 12px;
+  flex-shrink: 0;
+  background-size: cover;
+  background-position: center;
+}
+
+.friend-details {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.friend-name {
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.friend-status {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.friend-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.friend-action-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background-color: #111214;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+  color: #b5bac1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s, transform 0.1s;
+}
+
+.friend-action-btn:hover {
+  background-color: #35373c;
+  color: #fff;
+}
+
+.friend-action-btn:active {
+  transform: scale(0.92);
+}
+
+.friend-action-btn.accept {
+  color: #23a55a;
+}
+.friend-action-btn.accept:hover {
+  background-color: #23a55a;
+  color: #fff;
+}
+
+.friend-action-btn.reject {
+  color: #f23f43;
+}
+.friend-action-btn.reject:hover {
+  background-color: #f23f43;
+  color: #fff;
+}
+
+/* MOBİL GÜNCELLEMELER */
+@media (max-width: 768px) {
+  .server-sidebar {
+    width: 100%;
+    height: auto;
+    flex-direction: row;
+    justify-content: center;
+    padding: 8px;
+    border-bottom: 2px solid #111214;
+  }
+  .server-separator {
+    width: 2px;
+    height: 24px;
+    margin: 0 4px;
+  }
+}
+
+

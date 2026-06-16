@@ -1,0 +1,18 @@
+{
+  "user_yt3tzwby5_1781558236327": {
+    "friends": [],
+    "pending_incoming": [],
+    "pending_outgoing": [
+      "user_g_37kt66jzt_1781560521021"
+    ],
+    "dms": []
+  },
+  "user_g_37kt66jzt_1781560521021": {
+    "friends": [],
+    "pending_incoming": [
+      "user_yt3tzwby5_1781558236327"
+    ],
+    "pending_outgoing": [],
+    "dms": []
+  }
+}

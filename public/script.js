@@ -10,6 +10,12 @@ let myAvatar = localStorage.getItem('avatar') || '';
 let myAdminToken = localStorage.getItem('adminToken') || '';
 let amIAdmin = false;
 
+let joinedServers = [];
+let activeServerId = 'home';
+let activeDMUserId = null;
+let friendsData = { friends: [], pending_incoming: [], pending_outgoing: [], dms: [] };
+let activeFriendsTab = 'online';
+
 let currentTextRoom = 'genel';
 let currentVoiceRoom = null;
 
@@ -823,7 +829,7 @@ function initializePeer() {
     peer.on('open', id => {
         myPeerId = id;
         socket.emit('register', myPeerId, myUsername, myUserId, myAvatar, myAdminToken);
-        joinTextRoom(currentTextRoom);
+        loadServersAndInit(true);
     });
 
     peer.on('call', async call => {
@@ -1677,7 +1683,7 @@ socket.on('channels-list', ({ text, voice }) => {
 
 window.deleteChannel = function(name, type) {
     showCustomConfirm("Kanalı Sil", `"${name}" kanalını silmek istediğinize emin misiniz?`, true, () => {
-        socket.emit('delete-channel', { name, type });
+        socket.emit('delete-channel', { serverId: activeServerId, name, type });
     });
 };
 
@@ -1694,7 +1700,7 @@ if (addTextBtn) {
             if (name) {
                 const formatted = name.trim().toLowerCase().replace(/\s+/g, '-');
                 if (formatted) {
-                    socket.emit('create-channel', { name: formatted, type: 'text' });
+                    socket.emit('create-channel', { serverId: activeServerId, name: formatted, type: 'text' });
                 }
             }
         });
@@ -1708,7 +1714,7 @@ if (addVoiceBtn) {
             if (name) {
                 const formatted = name.trim();
                 if (formatted) {
-                    socket.emit('create-channel', { name: formatted, type: 'voice' });
+                    socket.emit('create-channel', { serverId: activeServerId, name: formatted, type: 'voice' });
                 }
             }
         });
@@ -1965,3 +1971,771 @@ if (screenShareStartBtn) {
         }
     });
 }
+
+// ==========================================
+// MULTI-SERVER & FRIENDS LOBBY LOGIC
+// ==========================================
+
+const serverIconsList = document.getElementById('server-icons-list');
+const activeServerTitle = document.getElementById('active-server-title');
+const serverInviteBtn = document.getElementById('server-invite-btn');
+const dmConversationsList = document.getElementById('dm-conversations-list');
+
+const homeSidebarContent = document.getElementById('home-sidebar-content');
+const serverSidebarContent = document.getElementById('server-sidebar-content');
+const friendsLobbyView = document.getElementById('friends-lobby-view');
+const chatContentView = document.getElementById('chat-content-view');
+const rightSidebarEl = document.getElementById('right-sidebar');
+
+// Tab Buttons
+const friendsTabOnline = document.getElementById('friends-tab-online');
+const friendsTabAll = document.getElementById('friends-tab-all');
+const friendsTabPending = document.getElementById('friends-tab-pending');
+const friendsTabAdd = document.getElementById('friends-tab-add');
+
+const friendsListView = document.getElementById('friends-list-view');
+const friendsAddView = document.getElementById('friends-add-view');
+const friendAddInput = document.getElementById('friend-add-input');
+const friendAddBtn = document.getElementById('friend-add-btn');
+const friendAddStatusMsg = document.getElementById('friend-add-status-msg');
+const pendingCountBadge = document.getElementById('pending-count-badge');
+
+// Modals
+const serverActionModal = document.getElementById('server-action-modal');
+const serverCreateModal = document.getElementById('server-create-modal');
+const serverJoinModal = document.getElementById('server-join-modal');
+const serverCreateInput = document.getElementById('server-create-input');
+const serverJoinInput = document.getElementById('server-join-input');
+
+async function loadServersAndInit(defaultSelect = true) {
+    const sessionToken = localStorage.getItem('sessionToken');
+    if (!sessionToken) return;
+
+    try {
+        // Load servers
+        const sRes = await fetch('/api/servers', {
+            headers: { 'Authorization': `Bearer ${sessionToken}` }
+        });
+        const sData = await sRes.json();
+        if (sData.success) {
+            joinedServers = sData.servers;
+            renderServersList();
+        }
+
+        // Load friends
+        await loadFriends();
+
+        if (defaultSelect) {
+            selectServer('home');
+        }
+    } catch (err) {
+        console.error("Yükleme hatası:", err);
+    }
+}
+
+function renderServersList() {
+    if (!serverIconsList) return;
+    serverIconsList.innerHTML = '';
+
+    joinedServers.forEach(server => {
+        const div = document.createElement('div');
+        div.className = `server-icon ${activeServerId === server.id ? 'active' : ''}`;
+        div.title = server.name;
+        div.dataset.id = server.id;
+
+        // Display server initial
+        const initial = document.createElement('span');
+        initial.textContent = server.name.charAt(0).toUpperCase();
+        div.appendChild(initial);
+
+        div.addEventListener('click', () => {
+            selectServer(server.id);
+        });
+
+        serverIconsList.appendChild(div);
+    });
+}
+
+function selectServer(serverId) {
+    activeServerId = serverId;
+
+    // Remove active class from all icons
+    document.getElementById('home-sidebar-btn').classList.remove('active');
+    document.querySelectorAll('.server-icon').forEach(icon => {
+        if (icon.dataset.id === serverId) icon.classList.add('active');
+        else icon.classList.remove('active');
+    });
+
+    if (serverId === 'home') {
+        document.getElementById('home-sidebar-btn').classList.add('active');
+        homeSidebarContent.style.display = 'flex';
+        serverSidebarContent.style.display = 'none';
+        rightSidebarEl.style.display = 'none';
+
+        if (activeDMUserId) {
+            friendsLobbyView.style.display = 'none';
+            chatContentView.style.display = 'flex';
+            document.querySelectorAll('.dm-conversations-item').forEach(item => {
+               item.classList.toggle('active', item.dataset.id === activeDMUserId);
+            });
+            document.getElementById('friends-tab-btn').classList.remove('active');
+        } else {
+            friendsLobbyView.style.display = 'flex';
+            chatContentView.style.display = 'none';
+            document.getElementById('friends-tab-btn').classList.add('active');
+            document.querySelectorAll('.dm-conversations-item').forEach(item => item.classList.remove('active'));
+            switchFriendsTab('online');
+        }
+    } else {
+        homeSidebarContent.style.display = 'none';
+        serverSidebarContent.style.display = 'flex';
+        rightSidebarEl.style.display = 'block';
+        friendsLobbyView.style.display = 'none';
+        chatContentView.style.display = 'flex';
+
+        const server = joinedServers.find(s => s.id === serverId);
+        if (server) {
+            activeServerTitle.textContent = server.name;
+            renderServerChannels(server);
+
+            // Channel create permissions check
+            const isOwner = server.ownerId === myUserId || amIAdmin;
+            document.getElementById('add-text-channel-btn').style.display = isOwner ? 'block' : 'none';
+            document.getElementById('add-voice-channel-btn').style.display = isOwner ? 'block' : 'none';
+
+            // Auto-join genel or first channel
+            if (server.channels.text.length > 0) {
+                const targetChannel = server.channels.text.includes('genel') ? 'genel' : server.channels.text[0];
+                const room = `serverChannel_${serverId}_${targetChannel}`;
+                
+                document.getElementById('current-room-name').textContent = `# ${targetChannel}`;
+                joinTextRoom(room);
+            }
+            
+            // Filter global users to show only server members in right sidebar
+            updateServerUsersList(server);
+        }
+    }
+    renderServersList();
+}
+
+function renderServerChannels(server) {
+    const textChannelsList = document.getElementById('text-channels-list');
+    const voiceChannelsList = document.getElementById('voice-channels-list');
+
+    if (textChannelsList) {
+        textChannelsList.innerHTML = '';
+        server.channels.text.forEach(ch => {
+            const li = document.createElement('li');
+            const roomName = `serverChannel_${server.id}_${ch}`;
+            li.className = `channel text-channel ${roomName === socket.textRoom ? 'active' : ''}`;
+            li.dataset.room = roomName;
+
+            let deleteBtn = '';
+            if ((server.ownerId === myUserId || amIAdmin) && ch !== 'genel') {
+                deleteBtn = `<button class="delete-channel-btn" onclick="event.stopPropagation(); deleteChannel('${ch}', 'text')" title="Kanalı Sil">×</button>`;
+            }
+
+            li.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+                    <div style="display:flex; align-items:center;">
+                        <svg width="20" height="24" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 6px;"><path d="M16 4h-2l-1 5h-5l1-5h-2l-1 5h-4v2h3.5l-1 5h-3.5v2h3.5l-1 5h2l1-5h5l-1 5h2l1-5h4v-2h-3.5l1-5h3.5v-2h-3.5l1-5zm-3 12h-5l1-5h5l-1 5z"/></svg>
+                        <span>${ch}</span>
+                    </div>
+                    ${deleteBtn}
+                </div>
+            `;
+
+            li.addEventListener('click', () => {
+                document.querySelectorAll('.text-channel').forEach(c => c.classList.remove('active'));
+                li.classList.add('active');
+                document.getElementById('current-room-name').textContent = `# ${ch}`;
+                joinTextRoom(roomName);
+            });
+
+            textChannelsList.appendChild(li);
+        });
+    }
+
+    if (voiceChannelsList) {
+        voiceChannelsList.innerHTML = '';
+        server.channels.voice.forEach(ch => {
+            const li = document.createElement('li');
+            const roomName = `serverVoice_${server.id}_${ch}`;
+            li.className = `channel voice-channel ${roomName === currentVoiceRoom ? 'active' : ''}`;
+            li.dataset.room = roomName;
+
+            let deleteBtn = '';
+            if (server.ownerId === myUserId || amIAdmin) {
+                deleteBtn = `<button class="delete-channel-btn" onclick="event.stopPropagation(); deleteChannel('${ch}', 'voice')" title="Kanalı Sil">×</button>`;
+            }
+
+            li.innerHTML = `
+                 <div class="voice-channel-header" style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+                     <div style="display:flex; align-items:center;">
+                         <svg width="20" height="24" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 6px; flex-shrink: 0;"><path d="M14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/><path d="M3 9v6h4l5 5V4L7 9H3z"/></svg>
+                         <span>${ch}</span>
+                     </div>
+                     ${deleteBtn}
+                 </div>
+                 <ul class="voice-users" id="voice-users-${roomName}"></ul>
+            `;
+
+            const header = li.querySelector('.voice-channel-header');
+            header.addEventListener('click', () => {
+                if (roomName !== currentVoiceRoom) connectVoiceRoom(roomName);
+            });
+
+            voiceChannelsList.appendChild(li);
+        });
+    }
+
+    socket.emit('get-voice-state');
+}
+
+function updateServerUsersList(server) {
+    const listEl = document.getElementById('users-list');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+    
+    document.getElementById('right-panel-header-title').textContent = `KULLANICILAR — ${server.members.length}`;
+
+    const sortedIds = Object.keys(allUsersList).sort((a, b) => {
+        const uA = allUsersList[a];
+        const uB = allUsersList[b];
+        if (uA.isOnline && !uB.isOnline) return -1;
+        if (!uA.isOnline && uB.isOnline) return 1;
+        if (uA.isAdmin && !uB.isAdmin) return -1;
+        if (!uA.isAdmin && uB.isAdmin) return 1;
+        return (uA.username || '').localeCompare(uB.username || '');
+    });
+
+    let onlineHeaderAdded = false;
+    let offlineHeaderAdded = false;
+
+    sortedIds.forEach(uid => {
+        // Display user only if they are a member of this server
+        if (!server.members.includes(uid)) return;
+
+        const u = allUsersList[uid];
+        const isMe = u.peerId === myPeerId;
+
+        if (u.isOnline && !onlineHeaderAdded) {
+            const hdr = document.createElement('li');
+            hdr.style.cssText = 'color:#72767d;font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;padding:12px 8px 4px;list-style:none;';
+            hdr.textContent = 'Çevrimiçi';
+            listEl.appendChild(hdr);
+            onlineHeaderAdded = true;
+        }
+        if (!u.isOnline && !offlineHeaderAdded) {
+            const hdr = document.createElement('li');
+            hdr.style.cssText = 'color:#72767d;font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;padding:12px 8px 4px;list-style:none;';
+            hdr.textContent = 'Çevrimdışı';
+            listEl.appendChild(hdr);
+            offlineHeaderAdded = true;
+        }
+
+        const li = document.createElement('li');
+        li.style.cssText = `opacity:${u.isOnline ? '1' : '0.45'}; display:flex; align-items:center; justify-content:space-between; padding:3px 4px; border-radius:4px; gap:4px;`;
+        li.style.transition = 'background 0.1s';
+        li.addEventListener('mouseenter', () => { if (!u.isOnline) li.style.background = 'rgba(255,255,255,0.03)'; else li.style.background = 'rgba(255,255,255,0.05)'; });
+        li.addEventListener('mouseleave', () => { li.style.background = 'transparent'; });
+
+        const infoDiv = document.createElement('div');
+        infoDiv.style.cssText = 'display:flex;align-items:center;gap:0;flex:1;min-width:0;';
+
+        const avatarWrapper = document.createElement('div');
+        avatarWrapper.style.cssText = 'position:relative;flex-shrink:0;margin-right:8px;';
+
+        const avatar = document.createElement('div');
+        avatar.className = 'right-panel-avatar';
+        if (u.avatar) {
+            avatar.style.backgroundImage = `url(${u.avatar})`;
+            avatar.style.backgroundSize = 'cover';
+            avatar.style.color = 'transparent';
+            avatar.textContent = '';
+        } else {
+            avatar.style.backgroundImage = '';
+            avatar.style.color = '';
+            avatar.textContent = (u.username || '?').charAt(0).toUpperCase();
+        }
+        avatarWrapper.appendChild(avatar);
+
+        const statusDot = document.createElement('div');
+        statusDot.style.cssText = `
+            position:absolute; bottom:-1px; right:-1px;
+            width:10px; height:10px; border-radius:50%;
+            background:${u.isOnline ? '#43b581' : '#747f8d'};
+            border:2px solid #2f3136;
+        `;
+        avatarWrapper.appendChild(statusDot);
+        infoDiv.appendChild(avatarWrapper);
+
+        const nameSpan = document.createElement('span');
+        nameSpan.style.cssText = 'display:flex;align-items:center;gap:5px;min-width:0;flex:1;';
+
+        const nameText = document.createElement('span');
+        nameText.style.cssText = 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:0.88rem;';
+        nameText.textContent = isMe ? u.username + ' (Sen)' : u.username;
+        if (isMe) { nameText.style.color = '#43b581'; nameText.style.fontWeight = 'bold'; }
+        nameSpan.appendChild(nameText);
+
+        if (server.ownerId === uid) {
+            const crown = document.createElement('span');
+            crown.title = 'Sunucu Sahibi';
+            crown.style.flexShrink = '0';
+            crown.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="#FEE75C"><path d="M2 22h20V2L15 9l-3-6-3 6L2 2z"/></svg>`;
+            nameSpan.appendChild(crown);
+        }
+
+        infoDiv.appendChild(nameSpan);
+        li.appendChild(infoDiv);
+
+        if (!isMe) {
+            const actionsDiv = document.createElement('div');
+            actionsDiv.style.cssText = 'display:flex;gap:3px;flex-shrink:0;';
+
+            if (u.isOnline) {
+                const callBtn = document.createElement('button');
+                callBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1-9.4 0-17-7.6-17-17 0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/></svg>`;
+                callBtn.title = 'Özel Çağrı';
+                callBtn.style.cssText = 'background:rgba(67,181,129,0.15);border:none;color:#43b581;width:26px;height:26px;border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.1s;';
+                callBtn.onclick = () => initiatePrivateCall(u.peerId, u.username);
+                actionsDiv.appendChild(callBtn);
+            }
+            li.appendChild(actionsDiv);
+        }
+
+        listEl.appendChild(li);
+    });
+}
+
+async function loadFriends() {
+    const sessionToken = localStorage.getItem('sessionToken');
+    if (!sessionToken) return;
+
+    try {
+        const res = await fetch('/api/friends', {
+            headers: { 'Authorization': `Bearer ${sessionToken}` }
+        });
+        const data = await res.json();
+        if (data.success) {
+            friendsData = data.friendsData;
+            renderDMConversations();
+            
+            // Update pending count badge
+            const pendingCount = friendsData.pending_incoming.length;
+            if (pendingCount > 0) {
+                pendingCountBadge.textContent = pendingCount;
+                pendingCountBadge.style.display = 'inline-block';
+            } else {
+                pendingCountBadge.style.display = 'none';
+            }
+        }
+    } catch (e) {
+        console.error("Arkadaş bilgileri yüklenemedi:", e);
+    }
+}
+
+function renderDMConversations() {
+    if (!dmConversationsList) return;
+    dmConversationsList.innerHTML = '';
+
+    friendsData.dms.forEach(user => {
+        const li = document.createElement('li');
+        li.className = `channel text-channel dm-conversations-item ${activeDMUserId === user.id ? 'active' : ''}`;
+        li.dataset.id = user.id;
+
+        // Get status
+        const isOnline = allUsersList[user.id]?.isOnline || false;
+
+        li.innerHTML = `
+            <div style="display:flex; align-items:center; width:100%; position:relative;">
+                <div class="voice-avatar" style="width:24px; height:24px; margin-right:8px; background-image:url(${user.avatar || 'data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22%23dcddde%22><path d=%22M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z%22/></svg>'}); background-size:cover; border-color:${isOnline ? '#43b581' : 'transparent'};"></div>
+                <span style="font-weight: 500; font-size: 0.88rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px;">${user.username}</span>
+                <span style="position:absolute; right:0; width:8px; height:8px; border-radius:50%; background:${isOnline ? '#43b581' : '#747f8d'};"></span>
+            </div>
+        `;
+
+        li.addEventListener('click', () => {
+            startDM(user.id, user.username);
+        });
+
+        dmConversationsList.appendChild(li);
+    });
+}
+
+function startDM(friendId, username) {
+    activeDMUserId = friendId;
+    
+    // Switch to DM room
+    const smaller = myUserId < friendId ? myUserId : friendId;
+    const larger = myUserId > friendId ? myUserId : friendId;
+    const roomName = `dm_${smaller}_${larger}`;
+
+    friendsLobbyView.style.display = 'none';
+    chatContentView.style.display = 'flex';
+
+    document.querySelectorAll('.dm-conversations-item').forEach(item => {
+        item.classList.toggle('active', item.dataset.id === friendId);
+    });
+    document.getElementById('friends-tab-btn').classList.remove('active');
+
+    document.getElementById('current-room-name').textContent = `@ ${username}`;
+    joinTextRoom(roomName);
+}
+
+function switchFriendsTab(tab) {
+    activeFriendsTab = tab;
+    
+    friendsTabOnline.classList.toggle('active', tab === 'online');
+    friendsTabAll.classList.toggle('active', tab === 'all');
+    friendsTabPending.classList.toggle('active', tab === 'pending');
+    friendsTabAdd.classList.toggle('active', tab === 'add');
+
+    if (tab === 'add') {
+        friendsListView.style.display = 'none';
+        friendsAddView.style.display = 'block';
+        friendAddStatusMsg.textContent = '';
+    } else {
+        friendsListView.style.display = 'block';
+        friendsAddView.style.display = 'none';
+        renderFriendsList();
+    }
+}
+
+function renderFriendsList() {
+    friendsListView.innerHTML = '';
+
+    let list = [];
+    if (activeFriendsTab === 'online') {
+        list = friendsData.friends.filter(f => allUsersList[f.id]?.isOnline === true);
+    } else if (activeFriendsTab === 'all') {
+        list = friendsData.friends;
+    } else if (activeFriendsTab === 'pending') {
+        list = [
+            ...friendsData.pending_incoming.map(f => ({ ...f, type: 'incoming' })),
+            ...friendsData.pending_outgoing.map(f => ({ ...f, type: 'outgoing' }))
+        ];
+    }
+
+    if (list.length === 0) {
+        friendsListView.innerHTML = `<div style="color:var(--text-muted); text-align:center; padding:40px; font-size:0.95rem;">Gösterilecek arkadaş bulunamadı.</div>`;
+        return;
+    }
+
+    const container = document.createElement('div');
+    container.className = 'friends-list-container';
+
+    list.forEach(friend => {
+        const row = document.createElement('div');
+        row.className = 'friend-row';
+
+        const info = document.createElement('div');
+        info.className = 'friend-info';
+
+        const isOnline = allUsersList[friend.id]?.isOnline || false;
+
+        const avatar = document.createElement('div');
+        avatar.className = 'friend-avatar';
+        if (friend.avatar) {
+            avatar.style.backgroundImage = `url(${friend.avatar})`;
+        } else {
+            avatar.textContent = friend.username.charAt(0).toUpperCase();
+        }
+
+        const details = document.createElement('div');
+        details.className = 'friend-details';
+
+        const name = document.createElement('div');
+        name.className = 'friend-name';
+        name.textContent = friend.username;
+
+        const status = document.createElement('div');
+        status.className = 'friend-status';
+        
+        if (friend.type === 'incoming') {
+            status.textContent = 'Gelen arkadaşlık isteği';
+        } else if (friend.type === 'outgoing') {
+            status.textContent = 'Giden arkadaşlık isteği';
+        } else {
+            status.innerHTML = `<span style="width:8px; height:8px; border-radius:50%; background:${isOnline ? '#43b581' : '#747f8d'}; display:inline-block;"></span> ${isOnline ? 'Çevrimiçi' : 'Çevrimdışı'}`;
+        }
+
+        details.appendChild(name);
+        details.appendChild(status);
+        info.appendChild(avatar);
+        info.appendChild(details);
+        row.appendChild(info);
+
+        // Action Buttons
+        const actions = document.createElement('div');
+        actions.className = 'friend-actions';
+
+        if (friend.type === 'incoming') {
+            const acceptBtn = document.createElement('button');
+            acceptBtn.className = 'friend-action-btn accept';
+            acceptBtn.title = 'Kabul Et';
+            acceptBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`;
+            acceptBtn.onclick = () => respondFriendRequest(friend.id, 'accept');
+            
+            const rejectBtn = document.createElement('button');
+            rejectBtn.className = 'friend-action-btn reject';
+            rejectBtn.title = 'Reddet';
+            rejectBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>`;
+            rejectBtn.onclick = () => respondFriendRequest(friend.id, 'reject');
+
+            actions.appendChild(acceptBtn);
+            actions.appendChild(rejectBtn);
+        } else if (friend.type === 'outgoing') {
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'friend-action-btn reject';
+            cancelBtn.title = 'İptal Et';
+            cancelBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>`;
+            cancelBtn.onclick = () => respondFriendRequest(friend.id, 'reject');
+            actions.appendChild(cancelBtn);
+        } else {
+            // Send DM button
+            const msgBtn = document.createElement('button');
+            msgBtn.className = 'friend-action-btn';
+            msgBtn.title = 'Mesaj Gönder';
+            msgBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/></svg>`;
+            msgBtn.onclick = () => {
+                fetch('/api/friends/dm', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('sessionToken')}`
+                    },
+                    body: JSON.stringify({ friendId: friend.id })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        loadFriends().then(() => {
+                            startDM(friend.id, friend.username);
+                        });
+                    }
+                });
+            };
+
+            // Remove friend button
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'friend-action-btn reject';
+            removeBtn.title = 'Arkadaşı Sil';
+            removeBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>`;
+            removeBtn.onclick = () => {
+                showCustomConfirm("Arkadaşı Sil", `"${friend.username}" arkadaş listenizden silinsin mi?`, true, () => {
+                    respondFriendRequest(friend.id, 'reject');
+                });
+            };
+
+            actions.appendChild(msgBtn);
+            actions.appendChild(removeBtn);
+        }
+
+        row.appendChild(actions);
+        container.appendChild(row);
+    });
+
+    friendsListView.appendChild(container);
+}
+
+async function respondFriendRequest(friendId, action) {
+    const sessionToken = localStorage.getItem('sessionToken');
+    const endpoint = action === 'accept' ? '/api/friends/accept' : '/api/friends/reject';
+    
+    try {
+        const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${sessionToken}`
+            },
+            body: JSON.stringify({ friendId })
+        });
+        const data = await res.json();
+        if (data.success) {
+            loadFriends().then(() => {
+                renderFriendsList();
+            });
+        } else {
+            showCustomAlert("Hata", data.error || "İşlem başarısız.");
+        }
+    } catch (e) {
+        showCustomAlert("Hata", "Sunucu ile bağlantı kurulamadı.");
+    }
+}
+
+// BIND MODAL ACTIONS & LISTENERS
+const addServerBtn = document.getElementById('add-server-sidebar-btn');
+if (addServerBtn) {
+    addServerBtn.addEventListener('click', () => {
+        serverActionModal.style.display = 'flex';
+    });
+}
+
+document.getElementById('server-action-close-btn').addEventListener('click', () => {
+    serverActionModal.style.display = 'none';
+});
+
+document.getElementById('server-action-create-tab-btn').addEventListener('click', () => {
+    serverActionModal.style.display = 'none';
+    serverCreateInput.value = '';
+    serverCreateModal.style.display = 'flex';
+    serverCreateInput.focus();
+});
+
+document.getElementById('server-action-join-tab-btn').addEventListener('click', () => {
+    serverActionModal.style.display = 'none';
+    serverJoinInput.value = '';
+    serverJoinModal.style.display = 'flex';
+    serverJoinInput.focus();
+});
+
+// Create Server
+document.getElementById('server-create-close-btn').addEventListener('click', () => serverCreateModal.style.display = 'none');
+document.getElementById('server-create-cancel-btn').addEventListener('click', () => {
+    serverCreateModal.style.display = 'none';
+    serverActionModal.style.display = 'flex';
+});
+document.getElementById('server-create-ok-btn').addEventListener('click', () => {
+    const name = serverCreateInput.value.trim();
+    if (!name) {
+        showCustomAlert("Hata", "Sunucu adı boş bırakılamaz.");
+        return;
+    }
+    
+    fetch('/api/servers/create', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('sessionToken')}`
+        },
+        body: JSON.stringify({ name })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            serverCreateModal.style.display = 'none';
+            loadServersAndInit(false).then(() => {
+                selectServer(data.server.id);
+            });
+        } else {
+            showCustomAlert("Hata", data.error || "Sunucu oluşturulamadı.");
+        }
+    });
+});
+
+// Join Server
+document.getElementById('server-join-close-btn').addEventListener('click', () => serverJoinModal.style.display = 'none');
+document.getElementById('server-join-cancel-btn').addEventListener('click', () => {
+    serverJoinModal.style.display = 'none';
+    serverActionModal.style.display = 'flex';
+});
+document.getElementById('server-join-ok-btn').addEventListener('click', () => {
+    const inviteCode = serverJoinInput.value.trim();
+    if (!inviteCode) {
+        showCustomAlert("Hata", "Davet kodu girmelisiniz.");
+        return;
+    }
+    
+    fetch('/api/servers/join', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('sessionToken')}`
+        },
+        body: JSON.stringify({ inviteCode })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            serverJoinModal.style.display = 'none';
+            loadServersAndInit(false).then(() => {
+                selectServer(data.server.id);
+            });
+        } else {
+            showCustomAlert("Hata", data.error || "Sunucuya katılamadı.");
+        }
+    });
+});
+
+// Invite Code Click
+if (serverInviteBtn) {
+    serverInviteBtn.addEventListener('click', () => {
+        const server = joinedServers.find(s => s.id === activeServerId);
+        if (server) {
+            showCustomConfirm(
+                "Sunucu Davet Kodu",
+                `Bu sunucunun davet kodu: ${server.inviteCode}\n\nKodu panoya kopyalamak ister misiniz?`,
+                false,
+                () => {
+                    navigator.clipboard.writeText(server.inviteCode).then(() => {
+                        showCustomAlert("Başarılı", "Davet kodu kopyalandı!");
+                    });
+                }
+            );
+        }
+    });
+}
+
+// Bind Home Logo & Friends Tab buttons
+document.getElementById('home-sidebar-btn').addEventListener('click', () => {
+    activeDMUserId = null;
+    selectServer('home');
+});
+document.getElementById('friends-tab-btn').addEventListener('click', () => {
+    activeDMUserId = null;
+    selectServer('home');
+});
+
+// Friend Lobby Tabs
+friendsTabOnline.addEventListener('click', () => switchFriendsTab('online'));
+friendsTabAll.addEventListener('click', () => switchFriendsTab('all'));
+friendsTabPending.addEventListener('click', () => switchFriendsTab('pending'));
+friendsTabAdd.addEventListener('click', () => switchFriendsTab('add'));
+
+// Friend Add request
+friendAddBtn.addEventListener('click', () => {
+    const target = friendAddInput.value.trim();
+    if (!target) return;
+    
+    fetch('/api/friends/request', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('sessionToken')}`
+        },
+        body: JSON.stringify({ target })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            friendAddInput.value = '';
+            friendAddStatusMsg.style.color = '#23a55a';
+            friendAddStatusMsg.textContent = 'Arkadaşlık isteği gönderildi!';
+            loadFriends();
+        } else {
+            friendAddStatusMsg.style.color = '#f23f43';
+            friendAddStatusMsg.textContent = data.error || 'İstek gönderilemedi.';
+        }
+    });
+});
+
+// Listen to server updates over socket
+socket.on('server-update', (serverId, updatedServer) => {
+    const idx = joinedServers.findIndex(s => s.id === serverId);
+    if (idx !== -1) {
+        joinedServers[idx] = updatedServer;
+    } else {
+        joinedServers.push(updatedServer);
+    }
+    
+    renderServersList();
+    
+    if (activeServerId === serverId) {
+        renderServerChannels(updatedServer);
+        updateServerUsersList(updatedServer);
+    }
+});

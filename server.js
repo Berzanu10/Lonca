@@ -199,6 +199,11 @@ app.post('/api/auth/register', (req, res) => {
 
    saveUsers();
 
+   if (serversDb['server_default'] && !serversDb['server_default'].members.includes(userId)) {
+      serversDb['server_default'].members.push(userId);
+      saveServers();
+   }
+
    const token = generateToken({ userId: userId });
    res.json({
       success: true,
@@ -290,6 +295,11 @@ app.post('/api/auth/google', (req, res) => {
       };
       user = usersDb[userId];
       saveUsers();
+
+      if (serversDb['server_default'] && !serversDb['server_default'].members.includes(userId)) {
+         serversDb['server_default'].members.push(userId);
+         saveServers();
+      }
    } else {
       // Update avatar if we got it from google and didn't have one before
       let changed = false;
@@ -504,6 +514,239 @@ app.post('/api/users/profile', authenticateToken, (req, res) => {
    });
 });
 
+// SERVERS & FRIENDS DATABASE LOADERS
+const SERVERS_FILE = path.join(__dirname, 'servers.json');
+let serversDb = {};
+try {
+   if (fs.existsSync(SERVERS_FILE)) {
+      serversDb = JSON.parse(fs.readFileSync(SERVERS_FILE, 'utf8'));
+   } else {
+      fs.writeFileSync(SERVERS_FILE, JSON.stringify(serversDb, null, 2), 'utf8');
+   }
+} catch (err) {
+   console.error("Sunucular yüklenirken hata oluştu:", err);
+}
+
+function saveServers() {
+   try {
+      fs.writeFileSync(SERVERS_FILE, JSON.stringify(serversDb, null, 2), 'utf8');
+   } catch (err) {
+      console.error("Sunucular kaydedilirken hata oluştu:", err);
+   }
+}
+
+const FRIENDS_FILE = path.join(__dirname, 'friends.json');
+let friendsDb = {};
+try {
+   if (fs.existsSync(FRIENDS_FILE)) {
+      friendsDb = JSON.parse(fs.readFileSync(FRIENDS_FILE, 'utf8'));
+   } else {
+      fs.writeFileSync(FRIENDS_FILE, JSON.stringify(friendsDb, null, 2), 'utf8');
+   }
+} catch (err) {
+   console.error("Arkadaşlar yüklenirken hata oluştu:", err);
+}
+
+function saveFriends() {
+   try {
+      fs.writeFileSync(FRIENDS_FILE, JSON.stringify(friendsDb, null, 2), 'utf8');
+   } catch (err) {
+      console.error("Arkadaşlar kaydedilirken hata oluştu:", err);
+   }
+}
+
+function getOrCreateUserFriends(userId) {
+   if (!friendsDb[userId]) {
+      friendsDb[userId] = {
+         friends: [],
+         pending_incoming: [],
+         pending_outgoing: [],
+         dms: []
+      };
+      saveFriends();
+   }
+   return friendsDb[userId];
+}
+
+// MULTI-SERVER API ENDPOINTS
+app.get('/api/servers', authenticateToken, (req, res) => {
+   const userId = req.user.userId;
+   const userServers = Object.values(serversDb).filter(s => s.members && s.members.includes(userId));
+   res.json({ success: true, servers: userServers });
+});
+
+app.post('/api/servers/create', authenticateToken, (req, res) => {
+   const { name } = req.body;
+   const userId = req.user.userId;
+   if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Sunucu adı boş olamaz.' });
+   }
+
+   const serverId = 'server_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+   const inviteCode = Math.random().toString(36).substr(2, 6).toUpperCase();
+
+   serversDb[serverId] = {
+      id: serverId,
+      name: name.trim(),
+      ownerId: userId,
+      inviteCode: inviteCode,
+      members: [userId],
+      channels: {
+         text: ["genel"],
+         voice: ["sohbet"]
+      }
+   };
+
+   saveServers();
+   res.json({ success: true, server: serversDb[serverId] });
+});
+
+app.post('/api/servers/join', authenticateToken, (req, res) => {
+   const { inviteCode } = req.body;
+   const userId = req.user.userId;
+   if (!inviteCode || !inviteCode.trim()) {
+      return res.status(400).json({ error: 'Davet kodu boş olamaz.' });
+   }
+
+   const normalizedCode = inviteCode.trim().toUpperCase();
+   const server = Object.values(serversDb).find(s => s.inviteCode === normalizedCode);
+
+   if (!server) {
+      return res.status(404).json({ error: 'Geçersiz davet kodu.' });
+   }
+
+   if (!server.members) server.members = [];
+   if (server.members.includes(userId)) {
+      return res.status(400).json({ error: 'Bu sunucuya zaten katılmışsınız.' });
+   }
+
+   server.members.push(userId);
+   saveServers();
+
+   res.json({ success: true, server });
+});
+
+// FRIENDS & DMS API ENDPOINTS
+app.get('/api/friends', authenticateToken, (req, res) => {
+   const userId = req.user.userId;
+   const fData = getOrCreateUserFriends(userId);
+   
+   // Fetch details of friends and pending requests to render them nicely
+   const details = {
+      friends: fData.friends.map(id => ({ id, username: usersDb[id]?.username || 'Kullanıcı', avatar: usersDb[id]?.avatar || '', email: usersDb[id]?.email || '' })),
+      pending_incoming: fData.pending_incoming.map(id => ({ id, username: usersDb[id]?.username || 'Kullanıcı', avatar: usersDb[id]?.avatar || '', email: usersDb[id]?.email || '' })),
+      pending_outgoing: fData.pending_outgoing.map(id => ({ id, username: usersDb[id]?.username || 'Kullanıcı', avatar: usersDb[id]?.avatar || '', email: usersDb[id]?.email || '' })),
+      dms: fData.dms.map(id => ({ id, username: usersDb[id]?.username || 'Kullanıcı', avatar: usersDb[id]?.avatar || '', email: usersDb[id]?.email || '' }))
+   };
+   
+   res.json({ success: true, friendsData: details });
+});
+
+app.post('/api/friends/request', authenticateToken, (req, res) => {
+   const { target } = req.body;
+   const userId = req.user.userId;
+   if (!target || !target.trim()) {
+      return res.status(400).json({ error: 'Lütfen kullanıcı adı veya e-posta girin.' });
+   }
+
+   const normalizedTarget = target.trim().toLowerCase();
+   const targetUser = Object.values(usersDb).find(u => 
+      u.email.toLowerCase() === normalizedTarget || 
+      u.username.toLowerCase() === normalizedTarget
+   );
+
+   if (!targetUser) {
+      return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+   }
+
+   if (targetUser.id === userId) {
+      return res.status(400).json({ error: 'Kendinize arkadaşlık isteği gönderemezsiniz.' });
+   }
+
+   const myFriends = getOrCreateUserFriends(userId);
+   const targetFriends = getOrCreateUserFriends(targetUser.id);
+
+   if (myFriends.friends.includes(targetUser.id)) {
+      return res.status(400).json({ error: 'Bu kullanıcıyla zaten arkadaşsınız.' });
+   }
+
+   if (myFriends.pending_outgoing.includes(targetUser.id) || myFriends.pending_incoming.includes(targetUser.id)) {
+      return res.status(400).json({ error: 'Zaten bekleyen bir arkadaşlık isteği var.' });
+   }
+
+   myFriends.pending_outgoing.push(targetUser.id);
+   targetFriends.pending_incoming.push(userId);
+
+   saveFriends();
+   res.json({ success: true, message: 'Arkadaşlık isteği gönderildi.' });
+});
+
+app.post('/api/friends/accept', authenticateToken, (req, res) => {
+   const { friendId } = req.body;
+   const userId = req.user.userId;
+
+   const myFriends = getOrCreateUserFriends(userId);
+   const targetFriends = getOrCreateUserFriends(friendId);
+
+   if (!myFriends.pending_incoming.includes(friendId)) {
+      return res.status(400).json({ error: 'Böyle bir arkadaşlık isteği bulunamadı.' });
+   }
+
+   myFriends.pending_incoming = myFriends.pending_incoming.filter(id => id !== friendId);
+   targetFriends.pending_outgoing = targetFriends.pending_outgoing.filter(id => id !== userId);
+
+   if (!myFriends.friends.includes(friendId)) myFriends.friends.push(friendId);
+   if (!targetFriends.friends.includes(userId)) targetFriends.friends.push(userId);
+
+   saveFriends();
+   res.json({ success: true });
+});
+
+app.post('/api/friends/reject', authenticateToken, (req, res) => {
+   const { friendId } = req.body;
+   const userId = req.user.userId;
+
+   const myFriends = getOrCreateUserFriends(userId);
+   const targetFriends = getOrCreateUserFriends(friendId);
+
+   myFriends.pending_incoming = myFriends.pending_incoming.filter(id => id !== friendId);
+   myFriends.pending_outgoing = myFriends.pending_outgoing.filter(id => id !== friendId);
+   myFriends.friends = myFriends.friends.filter(id => id !== friendId);
+
+   targetFriends.pending_incoming = targetFriends.pending_incoming.filter(id => id !== userId);
+   targetFriends.pending_outgoing = targetFriends.pending_outgoing.filter(id => id !== userId);
+   targetFriends.friends = targetFriends.friends.filter(id => id !== userId);
+
+   saveFriends();
+   res.json({ success: true });
+});
+
+app.post('/api/friends/dm', authenticateToken, (req, res) => {
+   const { friendId } = req.body;
+   const userId = req.user.userId;
+
+   if (!usersDb[friendId]) {
+      return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+   }
+
+   const myFriends = getOrCreateUserFriends(userId);
+   if (!myFriends.dms) myFriends.dms = [];
+   if (!myFriends.dms.includes(friendId)) {
+      myFriends.dms.push(friendId);
+      saveFriends();
+   }
+
+   const targetFriends = getOrCreateUserFriends(friendId);
+   if (!targetFriends.dms) targetFriends.dms = [];
+   if (!targetFriends.dms.includes(userId)) {
+      targetFriends.dms.push(userId);
+      saveFriends();
+   }
+
+   res.json({ success: true });
+});
+
+
 const CHANNELS_FILE = path.join(__dirname, 'channels.json');
 let textRooms = { 'genel': {}, 'oyun': {}, 'muzik': {} };
 // Ses odalarında artık { username, mic: true|false, deaf: true|false } objesi saklanıyor
@@ -653,7 +896,11 @@ io.on('connection', (socket) => {
       socket.join('text-' + roomId);
 
       // Emit chat history to user
-      socket.emit('chat-history', messageHistory[roomId] || []);
+      if (!messageHistory[roomId]) {
+         messageHistory[roomId] = [];
+         saveMessages();
+      }
+      socket.emit('chat-history', messageHistory[roomId]);
    });
 
    socket.on('chat-message', (message) => {
@@ -740,36 +987,41 @@ io.on('connection', (socket) => {
    });
 
    // ADMİN İŞLEMLERİ (KANAL YÖNETİMİ & ATMA)
-   socket.on('create-channel', ({ name, type }) => {
-      if (!socket.isAdmin) return;
+   socket.on('create-channel', ({ serverId, name, type }) => {
+      const server = serversDb[serverId];
+      if (!server) return;
+      if (server.ownerId !== socket.userId && !socket.isAdmin) return;
+
       if (type === 'text') {
-         if (!textRooms[name]) {
-            textRooms[name] = {};
-            if (!messageHistory[name]) messageHistory[name] = [];
-            saveChannels();
-            io.emit('channels-list', { text: Object.keys(textRooms), voice: Object.keys(voiceRooms) });
+         const formatted = name.trim().toLowerCase().replace(/\s+/g, '-');
+         if (formatted && !server.channels.text.includes(formatted)) {
+            server.channels.text.push(formatted);
+            saveServers();
+            io.emit('server-update', serverId, server);
          }
       } else if (type === 'voice') {
-         if (!voiceRooms[name]) {
-            voiceRooms[name] = {};
-            saveChannels();
-            io.emit('channels-list', { text: Object.keys(textRooms), voice: Object.keys(voiceRooms) });
+         const formatted = name.trim();
+         if (formatted && !server.channels.voice.includes(formatted)) {
+            server.channels.voice.push(formatted);
+            saveServers();
+            io.emit('server-update', serverId, server);
          }
       }
    });
 
-   socket.on('delete-channel', ({ name, type }) => {
-      if (!socket.isAdmin) return;
+   socket.on('delete-channel', ({ serverId, name, type }) => {
+      const server = serversDb[serverId];
+      if (!server) return;
+      if (server.ownerId !== socket.userId && !socket.isAdmin) return;
+
       if (type === 'text' && name !== 'genel') {
-         delete textRooms[name];
-         delete messageHistory[name];
-         saveChannels();
-         saveMessages();
-         io.emit('channels-list', { text: Object.keys(textRooms), voice: Object.keys(voiceRooms) });
+         server.channels.text = server.channels.text.filter(ch => ch !== name);
+         saveServers();
+         io.emit('server-update', serverId, server);
       } else if (type === 'voice') {
-         delete voiceRooms[name];
-         saveChannels();
-         io.emit('channels-list', { text: Object.keys(textRooms), voice: Object.keys(voiceRooms) });
+         server.channels.voice = server.channels.voice.filter(ch => ch !== name);
+         saveServers();
+         io.emit('server-update', serverId, server);
       }
    });
 

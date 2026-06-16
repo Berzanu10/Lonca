@@ -1,0 +1,45 @@
+{
+  "server_default": {
+    "id": "server_default",
+    "name": "Lonca Ana Sunucu",
+    "ownerId": "user_yt3tzwby5_1781558236327",
+    "inviteCode": "LONCA1",
+    "members": [
+      "user_7egsw4ake_1781557821539",
+      "user_g_ghk1x9tzu_1781557986493",
+      "user_yt3tzwby5_1781558236327",
+      "user_g_y9agp9u1b_1781560442844",
+      "user_g_37kt66jzt_1781560521021"
+    ],
+    "channels": {
+      "text": [
+        "genel",
+        "oyun",
+        "muzik",
+        "koordinatlar"
+      ],
+      "voice": [
+        "sohbet",
+        "oyun",
+        "sessiz"
+      ]
+    }
+  },
+  "server_9rmrixru9_1781607494546": {
+    "id": "server_9rmrixru9_1781607494546",
+    "name": "Sunucu Denemesi",
+    "ownerId": "user_yt3tzwby5_1781558236327",
+    "inviteCode": "UTHNAJ",
+    "members": [
+      "user_yt3tzwby5_1781558236327"
+    ],
+    "channels": {
+      "text": [
+        "genel"
+      ],
+      "voice": [
+        "sohbet"
+      ]
+    }
+  }
+}
