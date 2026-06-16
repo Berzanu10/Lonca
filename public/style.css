@@ -55,7 +55,7 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
 /* Sol Panel - Görsel ve Degrade */
 .login-left-panel {
   flex: 1.1;
-  background: linear-gradient(135deg, #4f5bbf 0%, #2b3136 100%);
+  background: linear-gradient(135deg, #1f2347 0%, #0d0f12 100%);
   padding: 3rem;
   display: flex;
   flex-direction: column;
@@ -491,19 +491,20 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
 }
 
 .profile-modal-content {
-  width: 320px;
+  width: 340px;
   background: #18191c;
-  border-radius: 8px;
+  border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  box-shadow: 0 16px 40px rgba(0,0,0,0.6);
   display: flex;
   flex-direction: column;
   position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .profile-banner {
-  height: 60px;
-  background-color: var(--highlight-color);
+  height: 80px;
+  background: linear-gradient(135deg, #5865F2 0%, #8a2be2 100%);
 }
 
 .profile-avatar-container {
@@ -513,18 +514,18 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
 }
 
 .modal-avatar {
-  width: 80px;
-  height: 80px;
+  width: 90px;
+  height: 90px;
   border-radius: 50%;
   background-color: #202225;
   background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23dcddde"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>');
-  background-size: 50px;
+  background-size: 55px;
   background-position: center bottom;
   background-repeat: no-repeat;
   border: 6px solid #18191c;
   position: absolute;
-  top: -40px;
-  left: 16px;
+  top: -45px;
+  left: 20px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -557,10 +558,11 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
 }
 
 .profile-body {
-  padding: 16px;
+  padding: 24px 20px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  margin-top: 10px;
 }
 
 .profile-body label {
@@ -728,8 +730,8 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
 .profile-input-wrapper:focus-within {
   border-color: var(--highlight-color);
 }
-#profile-username-input, 
-#profile-admin-key {
+#profile-username-input,
+.profile-custom-input {
   flex-grow: 1;
   background: transparent !important;
   border: none !important;
@@ -743,8 +745,8 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
 /* Rozetler ve Kart Detayları */
 .profile-badges {
   position: absolute;
-  top: 10px;
-  right: 16px;
+  top: 15px;
+  right: 20px;
   display: flex;
   gap: 6px;
   background-color: #111214;
@@ -761,13 +763,14 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
 
 .profile-user-card-details {
   background-color: #111214;
-  border-radius: 12px;
-  padding: 14px;
+  border-radius: 8px;
+  padding: 16px;
   margin-top: 15px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  border: 1px solid rgba(255,255,255,0.02);
+  gap: 12px;
+  border: 1px solid rgba(255,255,255,0.05);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
 }
 
 .detail-item {

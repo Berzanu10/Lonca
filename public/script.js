@@ -190,6 +190,15 @@ const profileUsernameInput = document.getElementById('profile-username-input');
 const modalAvatarPreview = document.getElementById('modal-avatar-preview');
 const avatarFileInput = document.getElementById('avatar-file-input');
 const profileSaveBtn = document.getElementById('profile-save-btn');
+const profileLogoutBtn = document.getElementById('profile-logout-btn');
+const openPasswordModalBtn = document.getElementById('open-password-modal-btn');
+const passwordChangeModal = document.getElementById('password-change-modal');
+const passwordCloseBtn = document.getElementById('password-close-btn');
+const pwdCancelBtn = document.getElementById('pwd-cancel-btn');
+const pwdSaveBtn = document.getElementById('pwd-save-btn');
+const pwdOld = document.getElementById('pwd-old');
+const pwdNew = document.getElementById('pwd-new');
+const pwdNewConfirm = document.getElementById('pwd-new-confirm');
 const profileCancelBtn = document.getElementById('profile-cancel-btn');
 
 const micSVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>`;
@@ -248,6 +257,7 @@ function showLoginScreen() {
 // Oturum doğrulama kontrolü
 const sessionToken = localStorage.getItem('sessionToken');
 if (sessionToken) {
+    if (loginScreenWrapper) loginScreenWrapper.style.display = 'none';
     fetch('/api/auth/me', {
         headers: { 'Authorization': `Bearer ${sessionToken}` }
     })
@@ -492,19 +502,22 @@ function initGoogleAuth() {
         .then(r => r.json())
         .then(config => {
             if (config.googleClientId) {
-                if (typeof google !== 'undefined') {
-                    google.accounts.id.initialize({
-                        client_id: config.googleClientId,
-                        callback: handleCredentialResponse
-                    });
-                    google.accounts.id.renderButton(
-                        document.getElementById("google-signin-container"),
-                        { theme: "outline", size: "large", width: "100%" }
-                    );
-                    google.accounts.id.prompt(); // Tarayıcıda açık hesapları One Tap ile direkt göster
-                } else {
-                    setTimeout(initGoogleAuth, 1000);
+                function checkGoogle() {
+                    if (typeof google !== 'undefined') {
+                        google.accounts.id.initialize({
+                            client_id: config.googleClientId,
+                            callback: handleCredentialResponse
+                        });
+                        google.accounts.id.renderButton(
+                            document.getElementById("google-signin-container"),
+                            { theme: "outline", size: "large", width: "100%" }
+                        );
+                        google.accounts.id.prompt(); // Tarayıcıda açık hesapları One Tap ile direkt göster
+                    } else {
+                        setTimeout(checkGoogle, 100);
+                    }
                 }
+                checkGoogle();
             } else {
                 if (customGoogleBtn) {
                     customGoogleBtn.style.display = "flex";
@@ -571,8 +584,6 @@ function openProfileModal(isForceEdit = false) {
     }
 
     profileUsernameInput.value = myUsername || '';
-    const adminKeyInput = document.getElementById('profile-admin-key');
-    if (adminKeyInput) adminKeyInput.value = myAdminToken;
 
     // Badges & role updating
     const badgesDiv = document.getElementById('profile-modal-badges');
@@ -685,6 +696,82 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
+if (openPasswordModalBtn) {
+    openPasswordModalBtn.addEventListener('click', () => {
+        profileModal.style.display = 'none';
+        if (pwdOld) pwdOld.value = '';
+        if (pwdNew) pwdNew.value = '';
+        if (pwdNewConfirm) pwdNewConfirm.value = '';
+        passwordChangeModal.style.display = 'flex';
+    });
+}
+
+function closePasswordModalAndReturn() {
+    passwordChangeModal.style.display = 'none';
+    profileModal.style.display = 'flex';
+}
+
+if (passwordCloseBtn) passwordCloseBtn.addEventListener('click', closePasswordModalAndReturn);
+if (pwdCancelBtn) pwdCancelBtn.addEventListener('click', closePasswordModalAndReturn);
+
+if (pwdSaveBtn) {
+    pwdSaveBtn.addEventListener('click', () => {
+        const oldPassword = pwdOld.value;
+        const newPassword = pwdNew.value;
+        const confirmPassword = pwdNewConfirm.value;
+        
+        if (!oldPassword || !newPassword || !confirmPassword) {
+            showCustomAlert("Hata", "Lütfen tüm alanları doldurun.");
+            return;
+        }
+
+        if (newPassword !== confirmPassword) {
+            showCustomAlert("Hata", "Yeni şifreler uyuşmuyor.");
+            return;
+        }
+        if (newPassword.length < 6) {
+            showCustomAlert("Hata", "Yeni şifre en az 6 karakter olmalıdır.");
+            return;
+        }
+
+        const sessionToken = localStorage.getItem('sessionToken');
+
+        fetch('/api/users/profile', {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${sessionToken}`
+            },
+            body: JSON.stringify({
+                oldPassword: oldPassword,
+                newPassword: newPassword
+            })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                showCustomAlert("Başarılı", "Şifreniz başarıyla değiştirildi.", () => {
+                    closePasswordModalAndReturn();
+                });
+            } else {
+                showCustomAlert("Hata", data.error || "Şifre güncellenemedi.");
+            }
+        })
+        .catch(() => {
+            showCustomAlert("Hata", "Sunucu ile bağlantı kurulamadı.");
+        });
+    });
+}
+
+if (profileLogoutBtn) {
+    profileLogoutBtn.addEventListener('click', () => {
+        showCustomConfirm("Çıkış Yap", "Hesabınızdan çıkış yapmak istediğinize emin misiniz?", true, () => {
+            clearSession();
+            location.reload();
+        });
+    });
+}
+
 if (profileSaveBtn) {
     profileSaveBtn.addEventListener('click', () => {
         const newName = profileUsernameInput.value.trim();
@@ -697,7 +784,6 @@ if (profileSaveBtn) {
             return;
         }
         
-        const adminKeyVal = document.getElementById('profile-admin-key').value.trim();
         const avatarData = (modalAvatarPreview && modalAvatarPreview.dataset.tempAvatar) ? modalAvatarPreview.dataset.tempAvatar : myAvatar;
 
         const sessionToken = localStorage.getItem('sessionToken');
@@ -710,8 +796,7 @@ if (profileSaveBtn) {
             },
             body: JSON.stringify({
                 username: newName,
-                avatar: avatarData,
-                adminToken: adminKeyVal
+                avatar: avatarData
             })
         })
         .then(r => r.json())
@@ -719,11 +804,7 @@ if (profileSaveBtn) {
             if (data.success) {
                 localStorage.setItem('username', data.user.username);
                 localStorage.setItem('avatar', data.user.avatar || '');
-                if (adminKeyVal) {
-                    localStorage.setItem('adminToken', adminKeyVal);
-                } else {
-                    localStorage.removeItem('adminToken');
-                }
+                localStorage.removeItem('adminToken');
                 profileModal.style.display = 'none';
                 location.reload();
             } else {

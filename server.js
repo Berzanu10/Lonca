@@ -154,6 +154,11 @@ app.get('/api/auth/me', (req, res) => {
    const user = usersDb[payload.userId];
    if (!user) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
 
+   if (user.email === 'berzanu10@gmail.com' && !user.isAdmin) {
+      user.isAdmin = true;
+      saveUsers();
+   }
+
    res.json({
       success: true,
       user: {
@@ -189,7 +194,7 @@ app.post('/api/auth/register', (req, res) => {
       email: normalizedEmail,
       password: hashPassword(password),
       avatar: '',
-      isAdmin: false
+      isAdmin: (normalizedEmail === 'berzanu10@gmail.com')
    };
 
    saveUsers();
@@ -224,6 +229,11 @@ app.post('/api/auth/login', (req, res) => {
 
    if (!user.password || !verifyPassword(password, user.password)) {
       return res.status(400).json({ error: 'E-posta veya şifre hatalı.' });
+   }
+
+   if (normalizedEmail === 'berzanu10@gmail.com' && !user.isAdmin) {
+      user.isAdmin = true;
+      saveUsers();
    }
 
    const token = generateToken({ userId: user.id });
@@ -276,13 +286,17 @@ app.post('/api/auth/google', (req, res) => {
          email: googleEmail,
          googleId: googleSub,
          avatar: googlePicture,
-         isAdmin: false
+         isAdmin: (googleEmail === 'berzanu10@gmail.com')
       };
       user = usersDb[userId];
       saveUsers();
    } else {
       // Update avatar if we got it from google and didn't have one before
       let changed = false;
+      if (googleEmail === 'berzanu10@gmail.com' && !user.isAdmin) {
+         user.isAdmin = true;
+         changed = true;
+      }
       if (googlePicture && !user.avatar) {
          user.avatar = googlePicture;
          changed = true;
@@ -447,11 +461,26 @@ app.post('/api/auth/reset-password', (req, res) => {
 
 // PROFILE UPDATE ENDPOINT
 app.post('/api/users/profile', authenticateToken, (req, res) => {
-   const { username, avatar, adminToken } = req.body;
+   const { username, avatar, oldPassword, newPassword } = req.body;
    const userId = req.user.userId;
 
    const user = usersDb[userId];
    if (!user) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+
+   if (oldPassword && newPassword) {
+      if (user.googleId && !user.password) {
+         return res.status(400).json({ error: 'Bu hesap Google ile oluşturulmuş, şifre değiştirilemez.' });
+      }
+      if (!verifyPassword(oldPassword, user.password)) {
+         return res.status(400).json({ error: 'Mevcut şifre hatalı.' });
+      }
+      if (newPassword.length < 6) {
+         return res.status(400).json({ error: 'Yeni şifre en az 6 karakter olmalıdır.' });
+      }
+      user.password = hashPassword(newPassword);
+   } else if (newPassword && !oldPassword) {
+      return res.status(400).json({ error: 'Şifrenizi değiştirmek için mevcut şifrenizi girmelisiniz.' });
+   }
 
    if (username && username.trim()) {
       user.username = username.trim();
@@ -459,11 +488,6 @@ app.post('/api/users/profile', authenticateToken, (req, res) => {
 
    if (avatar !== undefined) {
       user.avatar = avatar;
-   }
-
-   // Update Admin status if adminToken is passed
-   if (adminToken !== undefined) {
-      user.isAdmin = (adminToken === ADMIN_KEY);
    }
 
    saveUsers();
@@ -588,6 +612,10 @@ io.on('connection', (socket) => {
       if (usersDb[uId]) {
          finalUsername = usersDb[uId].username || username;
          finalAvatar = usersDb[uId].avatar || avatar || '';
+         if (usersDb[uId].email === 'berzanu10@gmail.com' && !usersDb[uId].isAdmin) {
+            usersDb[uId].isAdmin = true;
+            saveUsers();
+         }
          isAdmin = usersDb[uId].isAdmin || isAdmin;
       }
       
