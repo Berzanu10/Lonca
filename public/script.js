@@ -40,6 +40,42 @@ let isMicMuted = false;
 let isDeafened = false;
 let prevMicMuted = false;
 
+// Sesli sohbet, müzik yerine insan konuşmasına göre ayarlanır. 48 kHz Opus,
+// yankı/arka plan gürültüsü azaltma ve otomatik mikrofon seviyesi sağlar.
+const VOICE_AUDIO_CONSTRAINTS = {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+    channelCount: 1,
+    sampleRate: 48000,
+    sampleSize: 16,
+    latency: { ideal: 0.02, max: 0.1 }
+};
+
+function getVoiceStream() {
+    return navigator.mediaDevices.getUserMedia({ audio: VOICE_AUDIO_CONSTRAINTS, video: false });
+}
+
+async function optimizeVoiceCall(call) {
+    try {
+        const connection = call?.peerConnection;
+        const sender = connection?.getSenders().find(item => item.track?.kind === 'audio');
+        if (!sender) return;
+
+        const parameters = sender.getParameters();
+        parameters.encodings = parameters.encodings?.length ? parameters.encodings : [{}];
+        // Opus için 64 kb/sn konuşma kalitesini korur; bağlantı daralırsa
+        // WebRTC yine uyum sağlar, fakat gereksiz düşük bit hıza sabitlenmez.
+        parameters.encodings[0].maxBitrate = 64000;
+        parameters.encodings[0].priority = 'high';
+        await sender.setParameters(parameters);
+    } catch (error) {
+        // Bazı tarayıcılar sender parametrelerini değiştirmeyi desteklemez;
+        // bu durumda WebRTC'nin yerleşik uyarlamalı ayarı kullanılır.
+        console.debug('Ses kalitesi ayarı uygulanamadı:', error);
+    }
+}
+
 const loginScreenWrapper = document.getElementById('login-screen-wrapper');
 const appContainer = document.getElementById('app-container');
 const loginView = document.getElementById('login-view');
@@ -212,7 +248,15 @@ const headSVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentCo
 
 // ONAYLANAN GİRİŞ İŞLEMİNİ YÖNETEN YARDIMCI FONKSİYON
 let peerInitialized = false;
+let isAuthenticated = false;
+let authCheckFinished = false;
+let googleAuthInitialized = false;
+
 function handleLoginSuccess(data, skipPeerInit) {
+    isAuthenticated = true;
+    // One Tap bildirimi daha önce sıraya alınmış olsa bile oturum açılmışken
+    // gösterilmesin. Bu, ekran görüntüsündeki sağ üst bildirimi kapatır.
+    if (window.google?.accounts?.id) google.accounts.id.cancel();
     myUsername = data.user.username;
     myUserId = data.user.id;
     myAvatar = data.user.avatar || '';
@@ -253,6 +297,11 @@ function handleLoginSuccess(data, skipPeerInit) {
         peerInitialized = true;
         initializePeer();
     }
+}
+
+function finishAuthCheck() {
+    authCheckFinished = true;
+    if (!isAuthenticated) initGoogleAuth();
 }
 
 // Çerez yardımcı fonksiyonları
@@ -361,11 +410,13 @@ if (sessionToken && sessionToken !== 'null' && sessionToken !== 'undefined') {
             clearSession();
             location.reload();
         }
+        finishAuthCheck();
     })
     .catch(() => {
         // Sunucu erişilemez durumdaysa mevcut bilgilerle devam et
         // (internet kesintisi olabilir, kullanıcıyı çıkartma)
         console.warn('Sunucu/api/auth/me erişilemedi, önbellek bilgileriyle devam ediliyor.');
+        finishAuthCheck();
     });
 } else {
     showLoginScreen();
@@ -375,9 +426,11 @@ if (sessionToken && sessionToken !== 'null' && sessionToken !== 'undefined') {
         .then(r => r.json())
         .then(data => {
             if (data.success) handleLoginSuccess(data, false);
+            finishAuthCheck();
         })
         .catch(() => {
             console.warn('Oturum çerezi doğrulanamadı.');
+            finishAuthCheck();
         });
 }
 
@@ -601,11 +654,17 @@ function showMockGoogleLogin() {
 }
 
 function initGoogleAuth() {
+    // Google One Tap yalnızca giriş ekranındaki, oturumu olmayan ziyaretçiye
+    // hazırlanır. Açık oturumda Google'ın giriş istemi hiç tetiklenmez.
+    if (!authCheckFinished || isAuthenticated || googleAuthInitialized) return;
+    googleAuthInitialized = true;
+
     fetch('/api/config')
         .then(r => r.json())
         .then(config => {
             if (config.googleClientId) {
                 function checkGoogle() {
+                    if (isAuthenticated) return;
                     if (typeof google !== 'undefined') {
                         google.accounts.id.initialize({
                             client_id: config.googleClientId,
@@ -615,7 +674,6 @@ function initGoogleAuth() {
                             document.getElementById("google-signin-container"),
                             { theme: "outline", size: "large", width: "100%" }
                         );
-                        google.accounts.id.prompt(); // Tarayıcıda açık hesapları One Tap ile direkt göster
                     } else {
                         setTimeout(checkGoogle, 100);
                     }
@@ -641,8 +699,6 @@ function initGoogleAuth() {
             }
         });
 }
-
-initGoogleAuth();
 
 function triggerForcedValidationErrors() {
     const modalContent = document.querySelector('.profile-modal-content');
@@ -942,7 +998,7 @@ function initializePeer() {
         if (call.metadata && call.metadata.type === 'voice-room') {
             if (!localAudioStream) {
                 try {
-                    localAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                    localAudioStream = await getVoiceStream();
                     monitorSpeech(localAudioStream, myPeerId);
                     applyHardwareStates();
                 } catch (err) { }
@@ -952,6 +1008,7 @@ function initializePeer() {
 
 
             call.on('stream', remoteAudio => {
+                optimizeVoiceCall(call);
                 playRemoteAudio(remoteAudio, call.peer);
                 monitorSpeech(remoteAudio, call.peer);
             });
@@ -1002,6 +1059,7 @@ function initializePeer() {
                 monitorSpeech(localVideoStream, myPeerId);
                 
                 call.on('stream', userStream => {
+                    optimizeVoiceCall(call);
                     addVideoStream(userStream, call.peer, callerName);
                     monitorSpeech(userStream, call.peer);
                 });
@@ -1482,15 +1540,18 @@ voiceChannels.forEach(channel => {
 });
 
 async function connectVoiceRoom(room) {
+    // Oda değiştirirken önce önceki akışı kapat. Eski sıralamada yeni alınan
+    // mikrofon akışı disconnectVoiceRoom tarafından durdurulabiliyordu.
+    disconnectVoiceRoom();
+
     try {
-        localAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        localAudioStream = await getVoiceStream();
         monitorSpeech(localAudioStream, myPeerId);
         applyHardwareStates();
     } catch (e) {
         showCustomAlert("Bağlantı Hatası", "Mikrofon izni olmadan sesli kanalla bağlantı kurulamaz."); return;
     }
 
-    disconnectVoiceRoom();
     currentVoiceRoom = room;
     document.querySelectorAll('.voice-channel').forEach(c => c.classList.remove('active'));
     const targetEl = document.querySelector(`.voice-channel[data-room="${room}"]`);
@@ -1524,6 +1585,7 @@ socket.on('voice-join-success', (usersInRoom) => {
             const call = peer.call(pId, localAudioStream, { metadata: { type: 'voice-room' } });
             voiceCalls[pId] = call;
             call.on('stream', remoteAudio => {
+                optimizeVoiceCall(call);
                 playRemoteAudio(remoteAudio, pId); monitorSpeech(remoteAudio, pId);
             });
             call.on('close', () => { removeRemoteAudio(pId); stopMonitor(pId); });
@@ -1743,7 +1805,10 @@ let callScreenStream = null;
 
 async function obtainLocalStream() {
     if (!localVideoStream) {
-        localVideoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        localVideoStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } },
+            audio: VOICE_AUDIO_CONSTRAINTS
+        });
         localVideoStream.getVideoTracks().forEach(t => t.enabled = false);
         isCallCameraOn = false;
         isCallMicMuted = false;
@@ -2506,12 +2571,12 @@ const serverJoinInput = document.getElementById('server-join-input');
 
 async function loadServersAndInit(defaultSelect = true) {
     const sessionToken = localStorage.getItem('sessionToken');
-    if (!sessionToken) return;
 
     try {
         // Load servers
         const sRes = await fetch('/api/servers', {
-            headers: { 'Authorization': `Bearer ${sessionToken}` }
+            credentials: 'same-origin',
+            headers: sessionToken ? { 'Authorization': `Bearer ${sessionToken}` } : {}
         });
         const sData = await sRes.json();
         if (sData.success) {
@@ -2819,11 +2884,11 @@ function updateServerUsersList(server) {
 // ==========================================
 async function showUserProfileCard(userId) {
     const sessionToken = localStorage.getItem('sessionToken');
-    if (!sessionToken) return;
 
     try {
         const res = await fetch(`/api/users/${userId}`, {
-            headers: { 'Authorization': `Bearer ${sessionToken}` }
+            credentials: 'same-origin',
+            headers: sessionToken ? { 'Authorization': `Bearer ${sessionToken}` } : {}
         });
         const data = await res.json();
         if (data.success) {
@@ -2957,6 +3022,7 @@ async function initiatePrivateCall(targetPeerId, targetUsername) {
         monitorSpeech(localVideoStream, myPeerId);
         
         call.on('stream', userStream => {
+            optimizeVoiceCall(call);
             addVideoStream(userStream, call.peer, targetUsername);
             monitorSpeech(userStream, call.peer);
         });
@@ -2979,11 +3045,11 @@ if (userProfileCardCloseBtn) {
 
 async function loadFriends() {
     const sessionToken = localStorage.getItem('sessionToken');
-    if (!sessionToken) return;
 
     try {
         const res = await fetch('/api/friends', {
-            headers: { 'Authorization': `Bearer ${sessionToken}` }
+            credentials: 'same-origin',
+            headers: sessionToken ? { 'Authorization': `Bearer ${sessionToken}` } : {}
         });
         const data = await res.json();
         if (data.success) {
