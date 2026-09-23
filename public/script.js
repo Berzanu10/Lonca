@@ -1,4 +1,14 @@
 const socket = io('/');
+
+socket.on('connect', () => {
+    if (myPeerId && myUsername) {
+        socket.emit('register', myPeerId, myUsername, myUserId, myAvatar, myAdminToken);
+    }
+    const savedRoom = localStorage.getItem('lastActiveTextRoom') || currentTextRoom;
+    if (savedRoom && socket.connected) {
+        socket.emit('join-text-room', savedRoom);
+    }
+});
 let peer, myPeerId, myUsername;
 
 let myUserId = localStorage.getItem('userId');
@@ -1011,10 +1021,12 @@ function initializePeer() {
                 optimizeVoiceCall(call);
                 playRemoteAudio(remoteAudio, call.peer);
                 monitorSpeech(remoteAudio, call.peer);
+                if (currentVoiceRoom) playVoiceJoinSound();
             });
             call.on('close', () => {
                 removeRemoteAudio(call.peer);
                 stopMonitor(call.peer);
+                if (currentVoiceRoom) playVoiceLeaveSound();
             });
             return;
         }
@@ -1282,9 +1294,13 @@ socket.on('global-users', (usersObj) => {
 // Metin Kanalları ve Sohbet Geçmişi
 // -----------------------------------------
 function joinTextRoom(room) {
-    if (!myPeerId) return;
+    if (!room) return;
+    currentTextRoom = room;
+    localStorage.setItem('lastActiveTextRoom', room);
     messages.innerHTML = '';
-    socket.emit('join-text-room', room);
+    if (socket) {
+        socket.emit('join-text-room', room);
+    }
 }
 socket.on('create-message', (message, senderName, msgId, isSystem) => {
     appendMessage(senderName, message, msgId, isSystem);
@@ -1542,7 +1558,7 @@ voiceChannels.forEach(channel => {
 async function connectVoiceRoom(room) {
     // Oda değiştirirken önce önceki akışı kapat. Eski sıralamada yeni alınan
     // mikrofon akışı disconnectVoiceRoom tarafından durdurulabiliyordu.
-    disconnectVoiceRoom();
+    disconnectVoiceRoom(false);
 
     try {
         localAudioStream = await getVoiceStream();
@@ -1572,6 +1588,7 @@ async function connectVoiceRoom(room) {
     }
     activeVoiceRoomName.textContent = `"${cleanRoomName}" / ${cleanServerName}`;
     socket.emit('join-voice-room', room);
+    playVoiceJoinSound();
 
     // Sunucuya state durumlarımızı hızla güncelletelim ki eksik kalmasın (Undefined Name & Missing State Çözümü)
     setTimeout(() => {
@@ -1590,6 +1607,20 @@ socket.on('voice-join-success', (usersInRoom) => {
             });
             call.on('close', () => { removeRemoteAudio(pId); stopMonitor(pId); });
         }
+    }
+});
+
+socket.on('voice-user-joined', (data) => {
+    // Bulunduğumuz ses odasına biri girdiğinde Discord katılma sesini çal
+    if (currentVoiceRoom && currentVoiceRoom === data.roomId && data.peerId !== myPeerId) {
+        playVoiceJoinSound();
+    }
+});
+
+socket.on('voice-user-left', (data) => {
+    // Bulunduğumuz ses odasından biri ayrıldığında ayrılma sesini çal
+    if (currentVoiceRoom && currentVoiceRoom === data.roomId && data.peerId !== myPeerId) {
+        playVoiceLeaveSound();
     }
 });
 
@@ -1697,9 +1728,10 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
     }
 });
 
-bottomLeaveVoiceBtn.addEventListener('click', disconnectVoiceRoom);
-function disconnectVoiceRoom() {
+bottomLeaveVoiceBtn.addEventListener('click', () => disconnectVoiceRoom(true));
+function disconnectVoiceRoom(playSound = true) {
     if (!currentVoiceRoom) return;
+    if (playSound) playVoiceLeaveSound();
 
     stopScreenSharing();
     screenShareStreams = {};
@@ -1717,6 +1749,103 @@ function disconnectVoiceRoom() {
     voiceConnectionInfo.style.display = 'none';
     currentVoiceRoom = null;
     audioContainer.innerHTML = '';
+}
+
+// -----------------------------------------
+// Discord Tarzı Ses Efektleri (Giriş & Çıkış)
+// -----------------------------------------
+let lastJoinSoundTime = 0;
+let lastLeaveSoundTime = 0;
+
+function playVoiceJoinSound() {
+    if (isDeafened) return;
+    const now = Date.now();
+    if (now - lastJoinSoundTime < 400) return; // 400ms debounce
+    lastJoinSoundTime = now;
+
+    try {
+        const audio = new Audio('/sounds/voice-join.wav');
+        audio.volume = 0.55;
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+            playPromise.catch(() => {
+                synthesizeDiscordChime(true);
+            });
+        }
+    } catch (e) {
+        synthesizeDiscordChime(true);
+    }
+}
+
+function playVoiceLeaveSound() {
+    if (isDeafened) return;
+    const now = Date.now();
+    if (now - lastLeaveSoundTime < 400) return;
+    lastLeaveSoundTime = now;
+
+    try {
+        const audio = new Audio('/sounds/voice-leave.wav');
+        audio.volume = 0.50;
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+            playPromise.catch(() => {
+                synthesizeDiscordChime(false);
+            });
+        }
+    } catch (e) {
+        synthesizeDiscordChime(false);
+    }
+}
+
+function synthesizeDiscordChime(isJoin) {
+    try {
+        initAudioContext();
+        if (!audioContext) return;
+        if (audioContext.state === 'suspended') {
+            audioContext.resume();
+        }
+
+        const now = audioContext.currentTime;
+        const f1 = isJoin ? 493.88 : 659.25; // B4 / E5
+        const f2 = isJoin ? 659.25 : 493.88; // E5 / B4
+
+        playChimeTone(audioContext, f1, now, 0.12, 0.28, 0.35);
+        playChimeTone(audioContext, f2, now + 0.105, 0.35, 0.40, 0.40);
+    } catch (e) {
+        console.warn('Audio chime error:', e);
+    }
+}
+
+function playChimeTone(ac, freq, startTime, duration, decayTime, gainVal) {
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    const oscH = ac.createOscillator();
+    const gainH = ac.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, startTime);
+
+    // 2. harmonik ile yumuşak zil/marimba tınısı
+    oscH.type = 'sine';
+    oscH.frequency.setValueAtTime(freq * 2, startTime);
+
+    gain.gain.setValueAtTime(0.0001, startTime);
+    gain.gain.exponentialRampToValueAtTime(gainVal, startTime + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration + decayTime);
+
+    gainH.gain.setValueAtTime(0.0001, startTime);
+    gainH.gain.exponentialRampToValueAtTime(gainVal * 0.18, startTime + 0.008);
+    gainH.gain.exponentialRampToValueAtTime(0.0001, startTime + (duration + decayTime) * 0.7);
+
+    osc.connect(gain);
+    gain.connect(ac.destination);
+    oscH.connect(gainH);
+    gainH.connect(ac.destination);
+
+    osc.start(startTime);
+    osc.stop(startTime + duration + decayTime + 0.05);
+    oscH.start(startTime);
+    oscH.stop(startTime + duration + decayTime + 0.05);
 }
 
 function playRemoteAudio(stream, peerId) {
@@ -2084,6 +2213,14 @@ socket.on('admin-status', (isAdmin) => {
 });
 
 socket.on('channels-list', ({ text, voice }) => {
+    // Eğer kullanıcı bir sunucu içindeyse sunucu kanallarının ezilmesini engelle
+    if (activeServerId && activeServerId !== 'home') {
+        const currentServer = joinedServers.find(s => s.id === activeServerId);
+        if (currentServer) {
+            renderServerChannels(currentServer);
+            return;
+        }
+    }
     // Render text channels
     if (textChannelsList) {
         textChannelsList.innerHTML = '';
@@ -2588,7 +2725,16 @@ async function loadServersAndInit(defaultSelect = true) {
         await loadFriends();
 
         if (defaultSelect) {
-            selectServer('home');
+            const savedServerId = localStorage.getItem('lastActiveServerId');
+            if (savedServerId && joinedServers.some(s => s.id === savedServerId)) {
+                selectServer(savedServerId);
+            } else if (joinedServers.length > 0) {
+                // Otomatik olarak Lonca Ana Sunucusunu aç
+                const defaultServer = joinedServers.find(s => s.id === 'server_default') || joinedServers[0];
+                selectServer(defaultServer.id);
+            } else {
+                selectServer('home');
+            }
         }
     } catch (err) {
         console.error("Yükleme hatası:", err);
@@ -2620,6 +2766,7 @@ function renderServersList() {
 
 function selectServer(serverId) {
     activeServerId = serverId;
+    localStorage.setItem('lastActiveServerId', serverId);
 
     // Remove active class from all icons
     document.getElementById('home-sidebar-btn').classList.remove('active');

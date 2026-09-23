@@ -6,6 +6,12 @@
       "text": "Berzan baba yapıyor bu sporu",
       "timestamp": 1781557079013,
       "pinned": false
+    },
+    {
+      "id": "msg_1781619491182_9eg0b",
+      "sender": "Berzan baba",
+      "text": "asd",
+      "timestamp": 1781619491182
     }
   ],
   "oyun": [],
@@ -20,11 +26,28 @@
   ],
   "serverChannel_server_default_genel": [
     {
+      "id": "msg_1781557079013_bb25o",
+      "sender": "Berzan baba",
+      "text": "Berzan baba yapıyor bu sporu",
+      "timestamp": 1781557079013,
+      "pinned": false
+    },
+    {
       "id": "msg_1781619491182_9eg0b",
       "sender": "Berzan baba",
       "text": "asd",
       "timestamp": 1781619491182
     }
   ],
-  "serverChannel_server_9rmrixru9_1781607494546_genel": []
+  "serverChannel_server_9rmrixru9_1781607494546_genel": [],
+  "serverChannel_server_default_oyun": [],
+  "serverChannel_server_default_muzik": [],
+  "serverChannel_server_default_koordinatlar": [
+    {
+      "id": "msg_1781556745870_957ne",
+      "sender": "Berzan baba",
+      "text": "Ev -500 x -1500",
+      "timestamp": 1781556745870
+    }
+  ]
 }
