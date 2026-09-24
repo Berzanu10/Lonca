@@ -1308,7 +1308,7 @@ socket.on('create-message', (message, senderName, msgId, isSystem) => {
     activeRoomMessages.push({ id: msgId, sender: senderName, text: message, isSystem: isSystem });
     
     // Play sound on new messages
-    if (!isSystem && senderName !== myUsername) {
+    if (!isSystem) {
         messageSound.play().catch(e => console.log("Audio play failed:", e));
     }
 });
