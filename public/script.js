@@ -1770,6 +1770,7 @@ voiceChannels.forEach(channel => {
 
 let latestVoiceRoomsState = {};
 const lastMeshRetryTimes = {};
+let knownVoicePeers = new Set();
 
 async function connectVoiceRoom(room) {
     if (!room) return;
@@ -1794,6 +1795,13 @@ async function connectVoiceRoom(room) {
     }
 
     currentVoiceRoom = room;
+    // Odaya girerken mevcut kullanıcıları kaydet ki onlar için tekrar giriş sesi çalmasın
+    if (latestVoiceRoomsState && latestVoiceRoomsState[room]) {
+        knownVoicePeers = new Set(Object.keys(latestVoiceRoomsState[room]).filter(id => id && id !== myPeerId));
+    } else {
+        knownVoicePeers = new Set();
+    }
+
     document.querySelectorAll('.voice-channel').forEach(c => c.classList.remove('active'));
     const targetEl = document.querySelector(`.voice-channel[data-room="${room}"]`);
     if (targetEl) targetEl.classList.add('active');
@@ -1833,9 +1841,12 @@ socket.on('voice-join-success', (usersInRoom) => {
 });
 
 socket.on('voice-user-joined', (data) => {
-    // Bulunduğumuz ses odasına biri girdiğinde Discord katılma sesini çal
+    // Bulunduğumuz ses odasına biri girdiğinde Discord katılma sesini ANINDA çal
     if (currentVoiceRoom && currentVoiceRoom === data.roomId && data.peerId !== myPeerId) {
         playVoiceJoinSound();
+        if (data.peerId) {
+            knownVoicePeers.add(data.peerId);
+        }
 
         // Yeni katılan kişinin bize çağrı başlatması beklenir; eğer 3.5 saniye içinde
         // bağlantı kurulamazsa (örneğin sinyal gecikmesi / NAT durumu) karşı tarafa kendimiz bağlanırız.
@@ -1854,6 +1865,9 @@ socket.on('voice-user-left', (data) => {
     // Bulunduğumuz ses odasından biri ayrıldığında ayrılma sesini çal ve kaynağı temizle
     if (currentVoiceRoom && currentVoiceRoom === data.roomId && data.peerId !== myPeerId) {
         playVoiceLeaveSound();
+        if (data.peerId) {
+            knownVoicePeers.delete(data.peerId);
+        }
         if (voiceCalls[data.peerId]) {
             try { voiceCalls[data.peerId].close(); } catch(e) {}
             delete voiceCalls[data.peerId];
@@ -1877,9 +1891,7 @@ function handleVoiceRoomCall(call, targetPeerId, isIncoming) {
         optimizeVoiceCall(call);
         playRemoteAudio(remoteAudio, targetPeerId);
         monitorSpeech(remoteAudio, targetPeerId);
-        if (isIncoming && currentVoiceRoom) {
-            playVoiceJoinSound();
-        }
+        // Giriş sesi odaya ilk girildiği an çalınır; WebRTC akışı geldiğinde ses doğrudan hoparlöre verilir.
     };
 
     call.on('stream', remoteAudio => {
@@ -2055,6 +2067,24 @@ document.addEventListener('visibilitychange', () => {
 
 socket.on('voice-rooms-state', (voiceRoomsData) => {
     latestVoiceRoomsState = voiceRoomsData || {};
+
+    // Odada yeni biri belirdiğinde (voice-user-joined sinyalinden önce bile gelse) anında giriş sesini çal
+    if (currentVoiceRoom && voiceRoomsData && voiceRoomsData[currentVoiceRoom]) {
+        const peersInCurrentRoom = Object.keys(voiceRoomsData[currentVoiceRoom]).filter(id => id && id !== myPeerId);
+        peersInCurrentRoom.forEach(pId => {
+            if (!knownVoicePeers.has(pId)) {
+                knownVoicePeers.add(pId);
+                playVoiceJoinSound();
+            }
+        });
+        // Odadan çıkanları takip setinden temizle
+        knownVoicePeers.forEach(pId => {
+            if (!voiceRoomsData[currentVoiceRoom][pId]) {
+                knownVoicePeers.delete(pId);
+            }
+        });
+    }
+
     document.querySelectorAll('.voice-users').forEach(ul => ul.innerHTML = '');
 
     for (let r in voiceRoomsData) {
@@ -2188,6 +2218,7 @@ function disconnectVoiceRoom(playSound = true) {
     document.querySelectorAll('.voice-channel').forEach(c => c.classList.remove('active'));
     voiceConnectionInfo.style.display = 'none';
     currentVoiceRoom = null;
+    knownVoicePeers = new Set();
 
     try {
         const audios = audioContainer.querySelectorAll('audio');
@@ -2203,21 +2234,28 @@ function disconnectVoiceRoom(playSound = true) {
 }
 
 // -----------------------------------------
-// Discord Tarzı Ses Efektleri (Giriş & Çıkış)
+// Discord Tarzı Ses Efektleri (Giriş & Çıkış) - Ön Belleğe Alınmış Sıfır Gecikmeli Çalma
 // -----------------------------------------
 let lastJoinSoundTime = 0;
 let lastLeaveSoundTime = 0;
 
+const joinSoundAudio = new Audio('/sounds/voice-join.wav');
+joinSoundAudio.preload = 'auto';
+joinSoundAudio.volume = 0.55;
+
+const leaveSoundAudio = new Audio('/sounds/voice-leave.wav');
+leaveSoundAudio.preload = 'auto';
+leaveSoundAudio.volume = 0.50;
+
 function playVoiceJoinSound() {
     if (isDeafened) return;
     const now = Date.now();
-    if (now - lastJoinSoundTime < 400) return; // 400ms debounce
+    if (now - lastJoinSoundTime < 450) return; // 450ms debounce
     lastJoinSoundTime = now;
 
     try {
-        const audio = new Audio('/sounds/voice-join.wav');
-        audio.volume = 0.55;
-        const playPromise = audio.play();
+        joinSoundAudio.currentTime = 0;
+        const playPromise = joinSoundAudio.play();
         if (playPromise !== undefined) {
             playPromise.catch(() => {
                 synthesizeDiscordChime(true);
@@ -2231,13 +2269,12 @@ function playVoiceJoinSound() {
 function playVoiceLeaveSound() {
     if (isDeafened) return;
     const now = Date.now();
-    if (now - lastLeaveSoundTime < 400) return;
+    if (now - lastLeaveSoundTime < 450) return;
     lastLeaveSoundTime = now;
 
     try {
-        const audio = new Audio('/sounds/voice-leave.wav');
-        audio.volume = 0.50;
-        const playPromise = audio.play();
+        leaveSoundAudio.currentTime = 0;
+        const playPromise = leaveSoundAudio.play();
         if (playPromise !== undefined) {
             playPromise.catch(() => {
                 synthesizeDiscordChime(false);
