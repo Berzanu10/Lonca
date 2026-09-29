@@ -393,9 +393,35 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background-color: var(--bg-co
 .message.mine strong { color: #43b581; }
 .message span { color: #dcddde; word-wrap: break-word; }
 
-#chat-form { padding: 1.5rem; display: flex; gap: 1rem; background-color: var(--chat-bg); }
-#chat-input { flex-grow: 1; padding: 1rem; border-radius: 4px; border: none; background-color: var(--input-bg); color: #fff; }
-#chat-form button { padding: 0 2rem; background-color: var(--highlight-color); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+.message-content-wrapper { display: flex; flex-direction: column; width: 100%; min-width: 0; }
+.message-text-wrapper { display: flex; align-items: baseline; flex-wrap: wrap; }
+.message-image-container { margin-top: 6px; max-width: 420px; }
+.message-image-content { max-width: 100%; max-height: 320px; border-radius: 8px; cursor: pointer; object-fit: cover; display: block; border: 1px solid rgba(255, 255, 255, 0.08); transition: transform 0.15s ease, filter 0.15s ease; }
+.message-image-content:hover { filter: brightness(1.08); transform: scale(1.01); }
+
+/* Görsel Önizleme Çubuğu */
+.image-preview-bar { padding: 10px 1.5rem 0 1.5rem; background-color: var(--chat-bg); display: flex; align-items: center; gap: 12px; }
+.image-preview-container { position: relative; display: inline-block; }
+.image-preview-thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; border: 2px solid var(--highlight-color); display: block; }
+.image-preview-remove-btn { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; background: #ed4245; color: white; border: none; border-radius: 50%; font-size: 13px; font-weight: bold; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
+.image-preview-remove-btn:hover { background: #da373c; transform: scale(1.1); }
+.image-preview-name { color: #949ba4; font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 250px; }
+
+#chat-form { padding: 1.5rem; display: flex; gap: 0.75rem; background-color: var(--chat-bg); align-items: center; }
+.chat-attach-btn { background: var(--input-bg); border: none; border-radius: 4px; color: #b9bbbe; padding: 0 1rem !important; height: 48px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: color 0.15s, background-color 0.15s; flex-shrink: 0; }
+.chat-attach-btn:hover { color: #fff; background-color: rgba(255, 255, 255, 0.12); }
+#chat-input { flex-grow: 1; padding: 1rem; border-radius: 4px; border: none; background-color: var(--input-bg); color: #fff; height: 48px; box-sizing: border-box; }
+#chat-form button[type="submit"] { padding: 0 1.8rem; height: 48px; background-color: var(--highlight-color); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; flex-shrink: 0; }
+
+/* Lightbox Modal */
+.image-lightbox-modal { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.88); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 99999; cursor: zoom-out; animation: fadein 0.2s ease; }
+.lightbox-content-box { position: relative; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; align-items: center; cursor: default; }
+.lightbox-img { max-width: 90vw; max-height: 82vh; border-radius: 8px; box-shadow: 0 12px 36px rgba(0, 0, 0, 0.8); object-fit: contain; }
+.lightbox-actions { display: flex; gap: 12px; margin-top: 12px; }
+.lightbox-btn { background: rgba(255, 255, 255, 0.15); color: white; border: none; padding: 6px 16px; border-radius: 4px; cursor: pointer; font-size: 0.9rem; transition: background 0.15s; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+.lightbox-btn:hover { background: rgba(255, 255, 255, 0.25); color: white; }
+.lightbox-close-btn { position: absolute; top: -36px; right: 0; background: transparent; border: none; color: #fff; font-size: 32px; cursor: pointer; line-height: 1; }
+.lightbox-close-btn:hover { color: #ed4245; }
 
 .danger-btn { background: var(--danger-color); color: white; border: none; padding: 0.8rem; border-radius: 4px; cursor: pointer; font-weight: bold; }
 @keyframes fadein { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }

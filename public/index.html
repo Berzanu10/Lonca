@@ -397,9 +397,24 @@
                   </div>
                </div>
 
+               <!-- Görsel Yükleme Önizleme Çubuğu -->
+               <div id="image-preview-bar" class="image-preview-bar" style="display: none;">
+                  <div class="image-preview-container">
+                     <img id="image-preview-thumb" class="image-preview-thumb" src="" alt="Önizleme">
+                     <button id="image-preview-remove-btn" class="image-preview-remove-btn" type="button" title="Görseli Kaldır">×</button>
+                  </div>
+                  <span id="image-preview-name" class="image-preview-name"></span>
+               </div>
+
                <form id="chat-form">
-                  <input type="text" id="chat-input" placeholder="Metin yaz..." autocomplete="off">
-                  <button type="submit">Gönder</button>
+                  <input type="file" id="image-file-input" accept="image/*" style="display: none;">
+                  <button type="button" id="attach-image-btn" class="chat-attach-btn" title="Fotoğraf / Görsel Gönder">
+                     <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+                     </svg>
+                  </button>
+                  <input type="text" id="chat-input" placeholder="Mesaj yaz veya görsel yapıştır..." autocomplete="off">
+                  <button type="submit" id="chat-send-btn">Gönder</button>
                </form>
             </div>
          </div>
@@ -861,6 +876,22 @@
                <button id="incoming-call-accept-btn" class="save-btn"
                   style="background-color: var(--success-color); padding: 10px 24px; border-radius: 8px; font-weight: 600; font-size: 0.9rem;"
                   type="button">Cevapla</button>
+            </div>
+         </div>
+      </div>
+
+      <!-- GÖRSEL BÜYÜTME (LIGHTBOX) MODALI -->
+      <div id="image-lightbox-modal" class="image-lightbox-modal" style="display: none;">
+         <div class="lightbox-content-box" onclick="event.stopPropagation();">
+            <button id="lightbox-close-btn" class="lightbox-close-btn" type="button" title="Kapat">×</button>
+            <img id="lightbox-img" class="lightbox-img" src="" alt="Görsel">
+            <div class="lightbox-actions">
+               <a id="lightbox-download-btn" class="lightbox-btn" href="" download="lonca_gorsel.png" target="_blank">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                     <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+                  </svg>
+                  İndir
+               </a>
             </div>
          </div>
       </div>

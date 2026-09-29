@@ -36,7 +36,8 @@ const io = new Server(server, {
    cors: {
       origin: "*",
       methods: ["GET", "POST"]
-   }
+   },
+   maxHttpBufferSize: 1e7 // 10 MB (Görsel ve büyük mesajlar için)
 });
 
 const { ExpressPeerServer } = require('peer');
@@ -178,6 +179,21 @@ function decodeJwt(token) {
 app.get('/api/config', (req, res) => {
    res.json({
       googleClientId: process.env.GOOGLE_CLIENT_ID || "" // Boş bırakıldığında otomatik simüle Google butonuna döner. Gerçek OAuth için Google Client ID girilmelidir.
+   });
+});
+
+// DB STATUS ENDPOINT
+app.get('/api/db-status', async (req, res) => {
+   let mongoCount = 0;
+   if (isMongoConnected && MessageModel) {
+      try {
+         mongoCount = await MessageModel.countDocuments();
+      } catch (e) {}
+   }
+   res.json({
+      mongoConnected: isMongoConnected,
+      mongoUriSet: !!(process.env.MONGODB_URI || process.env.MONGO_URL || process.env.MONGO_URI || process.env.MONGODB_URL),
+      totalMongoMessages: mongoCount
    });
 });
 
@@ -960,7 +976,8 @@ try {
       id: { type: String, required: true, unique: true, index: true },
       roomId: { type: String, required: true, index: true },
       sender: { type: String, required: true },
-      text: { type: String, required: true },
+      text: { type: String, default: '' },
+      image: { type: String, default: null },
       timestamp: { type: Number, required: true },
       pinned: { type: Boolean, default: false },
       isSystem: { type: Boolean, default: false },
@@ -972,11 +989,27 @@ try {
    console.error("[MongoDB] Model oluşturulurken hata:", e);
 }
 
-const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URL;
+const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URL || process.env.MONGO_URI || process.env.MONGODB_URL;
+
+mongoose.connection.on('connected', () => {
+   isMongoConnected = true;
+   console.log('✅ [MongoDB] Bulut veritabanı bağlantısı aktif.');
+});
+
+mongoose.connection.on('error', (err) => {
+   console.error('❌ [MongoDB] Bağlantı hatası:', err.message);
+});
+
+mongoose.connection.on('disconnected', () => {
+   isMongoConnected = false;
+   console.warn('⚠️ [MongoDB] Bulut veritabanı bağlantısı koptu.');
+});
+
 if (MONGODB_URI) {
-   console.log('[MongoDB] Bağlantı başlatılıyor...');
+   console.log('[MongoDB] Bulut veritabanı bağlantısı başlatılıyor...');
    mongoose.connect(MONGODB_URI, {
-      serverSelectionTimeoutMS: 5000
+      serverSelectionTimeoutMS: 20000,
+      autoIndex: true
    }).then(async () => {
       isMongoConnected = true;
       console.log('✅ [MongoDB] Bulut veritabanına başarıyla bağlanıldı! Mesajlar Render kapansa dahi kalıcı saklanacak.');
@@ -985,7 +1018,7 @@ if (MONGODB_URI) {
       console.error('❌ [MongoDB] Bağlantı hatası, yerel dosya sistemi (JSON) kullanılacak:', err.message);
    });
 } else {
-   console.log('ℹ️ [MongoDB] MONGODB_URI tanımlanmamış. Mesajlar yerel messages.json dosyasında saklanıyor. (Render uykuya geçtiğinde mesajların silinmemesi için Render Environment Variables içerisine MONGODB_URI ekleyebilirsiniz)');
+   console.log('ℹ️ [MongoDB] MONGODB_URI tanımlanmamış. Mesajlar yerel messages.json dosyasında saklanıyor.');
 }
 
 async function syncMessagesWithMongo() {
@@ -1003,7 +1036,8 @@ async function syncMessagesWithMongo() {
                messageHistory[rId].push({
                   id: doc.id,
                   sender: doc.sender,
-                  text: doc.text,
+                  text: doc.text || '',
+                  image: doc.image || null,
                   timestamp: doc.timestamp,
                   pinned: !!doc.pinned,
                   isSystem: !!doc.isSystem,
@@ -1015,17 +1049,51 @@ async function syncMessagesWithMongo() {
          console.log(`[MongoDB] ${importedCount} adet bulut mesajı yerel belleğe yüklendi.`);
       }
 
-      // 2. Bellekte olup bulutta henüz olmayan mesajları buluta kaydet (ilk senkronizasyon)
+      // 2. Sadece MongoDB'de henüz bulunmayan yerel mesajları buluta kaydet
+      const existingMongoIds = new Set((docs || []).map(d => d.id));
+      const newMessagesToUpload = [];
       for (const roomId in messageHistory) {
          for (const msg of messageHistory[roomId]) {
-            await MessageModel.findOneAndUpdate(
-               { id: msg.id },
-               { ...msg, roomId: roomId },
-               { upsert: true }
-            ).catch(() => {});
+            if (!existingMongoIds.has(msg.id)) {
+               newMessagesToUpload.push({
+                  updateOne: {
+                     filter: { id: msg.id },
+                     update: {
+                        $set: {
+                           id: msg.id,
+                           roomId: roomId,
+                           sender: msg.sender,
+                           text: msg.text || '',
+                           image: msg.image || null,
+                           timestamp: msg.timestamp,
+                           pinned: !!msg.pinned,
+                           isSystem: !!msg.isSystem,
+                           pinnedMsgId: msg.pinnedMsgId || null
+                        }
+                     },
+                     upsert: true
+                  }
+               });
+            }
          }
       }
+      if (newMessagesToUpload.length > 0) {
+         await MessageModel.bulkWrite(newMessagesToUpload).catch(e => console.error('[MongoDB bulkWrite error]:', e.message));
+         console.log(`[MongoDB] ${newMessagesToUpload.length} adet yeni yerel mesaj buluta aktarıldı.`);
+      }
+
+      // 3. Ayna kanalları eşitle (genel <-> serverChannel_server_default_genel)
+      migrateOldChannels();
       saveMessagesLocally();
+
+      // 4. Bağlı kullanıcılara güncel mesaj geçmişini anında ilet
+      if (typeof io !== 'undefined' && io.sockets && io.sockets.sockets) {
+         for (const [id, s] of io.sockets.sockets) {
+            if (s.textRoom && messageHistory[s.textRoom]) {
+               s.emit('chat-history', messageHistory[s.textRoom]);
+            }
+         }
+      }
    } catch (err) {
       console.error('[MongoDB] Mesaj senkronizasyon hatası:', err.message);
    }
@@ -1122,7 +1190,8 @@ function saveMessages(roomId, msgObj) {
             id: msgObj.id,
             roomId: roomId,
             sender: msgObj.sender,
-            text: msgObj.text,
+            text: msgObj.text || '',
+            image: msgObj.image || null,
             timestamp: msgObj.timestamp,
             pinned: !!msgObj.pinned,
             isSystem: !!msgObj.isSystem,
@@ -1204,7 +1273,8 @@ io.on('connection', (socket) => {
    });
 
    // METİN
-   socket.on('join-text-room', (roomId) => {
+   socket.on('join-text-room', async (roomId) => {
+      if (!roomId) return;
       if (socket.textRoom) {
          socket.leave('text-' + socket.textRoom);
          if (textRooms[socket.textRoom]) delete textRooms[socket.textRoom][socket.peerId];
@@ -1214,21 +1284,97 @@ io.on('connection', (socket) => {
       textRooms[roomId][socket.peerId] = socket.username;
       socket.join('text-' + roomId);
 
+      // Ayna (mirror) oda eşleşmesi
+      const mirrorMap = {
+         'genel': 'serverChannel_server_default_genel',
+         'serverChannel_server_default_genel': 'genel',
+         'oyun': 'serverChannel_server_default_oyun',
+         'serverChannel_server_default_oyun': 'oyun',
+         'muzik': 'serverChannel_server_default_muzik',
+         'serverChannel_server_default_muzik': 'muzik',
+         'koordinatlar': 'serverChannel_server_default_koordinatlar',
+         'serverChannel_server_default_koordinatlar': 'koordinatlar'
+      };
+
+      // MongoDB bağlıysa bu odaya (ve varsa aynasına) ait mesajları veritabanından çekip bellekle senkronize et
+      if (isMongoConnected && MessageModel) {
+         try {
+            const queryRooms = [roomId];
+            if (mirrorMap[roomId]) queryRooms.push(mirrorMap[roomId]);
+
+            const docs = await MessageModel.find({ roomId: { $in: queryRooms } }).sort({ timestamp: 1 }).lean();
+            if (docs && docs.length > 0) {
+               if (!messageHistory[roomId]) messageHistory[roomId] = [];
+               docs.forEach(doc => {
+                  if (!messageHistory[roomId].some(m => m.id === doc.id)) {
+                     messageHistory[roomId].push({
+                        id: doc.id,
+                        sender: doc.sender,
+                        text: doc.text || '',
+                        image: doc.image || null,
+                        timestamp: doc.timestamp,
+                        pinned: !!doc.pinned,
+                        isSystem: !!doc.isSystem,
+                        pinnedMsgId: doc.pinnedMsgId || null
+                     });
+                  }
+               });
+               messageHistory[roomId].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+
+               // Ayna odayı da senkronize et
+               if (mirrorMap[roomId]) {
+                  const mRoom = mirrorMap[roomId];
+                  if (!messageHistory[mRoom]) messageHistory[mRoom] = [];
+                  docs.forEach(doc => {
+                     if (!messageHistory[mRoom].some(m => m.id === doc.id)) {
+                        messageHistory[mRoom].push({
+                           id: doc.id,
+                           sender: doc.sender,
+                           text: doc.text || '',
+                           image: doc.image || null,
+                           timestamp: doc.timestamp,
+                           pinned: !!doc.pinned,
+                           isSystem: !!doc.isSystem,
+                           pinnedMsgId: doc.pinnedMsgId || null
+                        });
+                     }
+                  });
+                  messageHistory[mRoom].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+               }
+            }
+         } catch (e) {
+            console.error('[MongoDB] join-text-room sorgu hatası:', e.message);
+         }
+      }
+
       // Emit chat history to user
       if (!messageHistory[roomId]) {
          messageHistory[roomId] = [];
-         saveMessages();
+         saveMessagesLocally();
       }
       socket.emit('chat-history', messageHistory[roomId]);
    });
 
-   socket.on('chat-message', (message) => {
+   socket.on('chat-message', (data) => {
       if (socket.textRoom && socket.username) {
          const roomId = socket.textRoom;
+         let text = '';
+         let image = null;
+
+         if (typeof data === 'string') {
+            text = data.trim();
+         } else if (typeof data === 'object' && data !== null) {
+            text = (data.text || '').trim();
+            image = data.image || null;
+         }
+
+         if (!text && !image) return;
+
          const msgObj = {
             id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
             sender: socket.username,
-            text: message,
+            text: text,
+            image: image,
             timestamp: Date.now()
          };
 
@@ -1241,7 +1387,7 @@ io.on('connection', (socket) => {
 
          saveMessages(roomId, msgObj);
 
-         io.to('text-' + roomId).emit('create-message', message, socket.username, msgObj.id);
+         io.to('text-' + roomId).emit('create-message', text, socket.username, msgObj.id, false, image);
 
          // Çift yönlü oda eşitlemesi (genel <-> serverChannel_server_default_genel vb.)
          const defaultServerId = 'server_default';
@@ -1261,7 +1407,7 @@ io.on('connection', (socket) => {
                   messageHistory[targetMirror].push(msgObj);
                   if (messageHistory[targetMirror].length > 500) messageHistory[targetMirror].shift();
                   saveMessages(targetMirror, msgObj);
-                  io.to('text-' + targetMirror).emit('create-message', message, socket.username, msgObj.id);
+                  io.to('text-' + targetMirror).emit('create-message', text, socket.username, msgObj.id, false, image);
                }
                break;
             }
@@ -1275,7 +1421,8 @@ io.on('connection', (socket) => {
                io.to(targetSocketId).emit('dm-received', {
                   senderId: socket.userId,
                   senderName: socket.username,
-                  message: message,
+                  message: text,
+                  image: image,
                   roomId: roomId
                });
             }
@@ -1296,7 +1443,7 @@ io.on('connection', (socket) => {
       if (deleted) {
          saveMessagesLocally();
          if (isMongoConnected && MessageModel) {
-            MessageModel.deleteOne({ id: msgId }).catch(() => {});
+            MessageModel.deleteMany({ id: msgId }).catch(() => {});
          }
          io.emit('message-deleted', msgId);
       }

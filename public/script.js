@@ -1509,31 +1509,125 @@ function joinTextRoom(room) {
         socket.emit('join-text-room', room);
     }
 }
+let pendingImage = null; // { dataUrl, name }
+
+function handleSelectedImageFile(file) {
+    if (!file || !file.type.startsWith('image/')) {
+        if (typeof showCustomAlert === 'function') {
+            showCustomAlert("Geçersiz Dosya", "Lütfen geçerli bir görsel dosyası seçin (PNG, JPG, GIF, WEBP).");
+        }
+        return;
+    }
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const dataUrl = e.target.result;
+        if (file.type === 'image/gif' || file.size < 800 * 1024) {
+            setPendingImage(dataUrl, file.name);
+        } else {
+            const img = new Image();
+            img.onload = function() {
+                const maxDim = 1280;
+                let w = img.width;
+                let h = img.height;
+                if (w > maxDim || h > maxDim) {
+                    if (w > h) {
+                        h = Math.round((h * maxDim) / w);
+                        w = maxDim;
+                    } else {
+                        w = Math.round((w * maxDim) / h);
+                        h = maxDim;
+                    }
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, w, h);
+                const compressedUrl = canvas.toDataURL('image/jpeg', 0.85);
+                setPendingImage(compressedUrl, file.name);
+            };
+            img.onerror = function() {
+                setPendingImage(dataUrl, file.name);
+            };
+            img.src = dataUrl;
+        }
+    };
+    reader.readAsDataURL(file);
+}
+
+function setPendingImage(dataUrl, name) {
+    pendingImage = { dataUrl, name };
+    const bar = document.getElementById('image-preview-bar');
+    const thumb = document.getElementById('image-preview-thumb');
+    const nameEl = document.getElementById('image-preview-name');
+    if (bar && thumb && nameEl) {
+        thumb.src = dataUrl;
+        nameEl.textContent = name || 'Görsel';
+        bar.style.display = 'flex';
+    }
+}
+
+function clearPendingImage() {
+    pendingImage = null;
+    const bar = document.getElementById('image-preview-bar');
+    const thumb = document.getElementById('image-preview-thumb');
+    const input = document.getElementById('image-file-input');
+    if (bar) bar.style.display = 'none';
+    if (thumb) thumb.src = '';
+    if (input) input.value = '';
+}
+
+function openImageLightbox(src) {
+    const modal = document.getElementById('image-lightbox-modal');
+    const img = document.getElementById('lightbox-img');
+    const dl = document.getElementById('lightbox-download-btn');
+    if (modal && img) {
+        img.src = src;
+        if (dl) dl.href = src;
+        modal.style.display = 'flex';
+    }
+}
+
+function closeImageLightbox() {
+    const modal = document.getElementById('image-lightbox-modal');
+    if (modal) modal.style.display = 'none';
+}
+
 const messageSound = new Audio('/sounds/Discord-Mesaj-Sesi-Efekti.wav');
-socket.on('create-message', (message, senderName, msgId, isSystem) => {
-    appendMessage(senderName, message, msgId, isSystem);
-    activeRoomMessages.push({ id: msgId, sender: senderName, text: message, isSystem: isSystem });
+socket.on('create-message', (message, senderName, msgId, isSystem, image) => {
+    appendMessage(senderName, message, msgId, isSystem, false, image);
+    activeRoomMessages.push({ id: msgId, sender: senderName, text: message, isSystem: isSystem, image: image });
     
     // Play sound on new messages
     if (!isSystem) {
         messageSound.play().catch(e => console.log("Audio play failed:", e));
     }
 });
+
 socket.on('chat-history', (history) => {
     messages.innerHTML = '';
-    activeRoomMessages = history;
-    history.forEach(msg => {
-        appendMessage(msg.sender, msg.text, msg.id, msg.isSystem, msg.pinned);
+    activeRoomMessages = history || [];
+    activeRoomMessages.forEach(msg => {
+        appendMessage(msg.sender, msg.text, msg.id, msg.isSystem, msg.pinned, msg.image);
     });
     messages.scrollTop = messages.scrollHeight;
     updatePinnedMessagesBanner();
 });
+
 chatForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const msg = chatInput.value.trim();
-    if (msg) { socket.emit('chat-message', msg); chatInput.value = ''; }
+    if (pendingImage || msg) {
+        socket.emit('chat-message', {
+            text: msg,
+            image: pendingImage ? pendingImage.dataUrl : null
+        });
+        clearPendingImage();
+        chatInput.value = '';
+    }
 });
-function appendMessage(sender, msg, msgId, isSystem, isPinned) {
+
+function appendMessage(sender, msg, msgId, isSystem, isPinned, image) {
     const div = document.createElement('div');
     div.classList.add('message');
     div.setAttribute('data-id', msgId);
@@ -1558,16 +1652,14 @@ function appendMessage(sender, msg, msgId, isSystem, isPinned) {
     selectContainer.appendChild(checkbox);
     div.appendChild(selectContainer);
 
-    // Message text contents container
+    // Message text & media contents container
     const contentDiv = document.createElement('div');
-    contentDiv.style.display = 'flex';
-    contentDiv.style.justifyContent = 'space-between';
-    contentDiv.style.width = '100%';
-    contentDiv.style.alignItems = 'center';
+    contentDiv.className = 'message-content-wrapper';
     
     const textWrapper = document.createElement('div');
+    textWrapper.className = 'message-text-wrapper';
     if (isSystem) {
-        textWrapper.innerHTML = `<span>${msg}</span>`;
+        textWrapper.innerHTML = `<span>${msg || ''}</span>`;
     } else {
         const strong = document.createElement('strong');
         strong.textContent = sender + ':';
@@ -1578,13 +1670,34 @@ function appendMessage(sender, msg, msgId, isSystem, isPinned) {
                 showUserProfileCard(user.userId);
             }
         });
-        const span = document.createElement('span');
-        span.textContent = msg;
         textWrapper.appendChild(strong);
-        textWrapper.appendChild(document.createTextNode(' '));
-        textWrapper.appendChild(span);
+        if (msg) {
+            textWrapper.appendChild(document.createTextNode(' '));
+            const span = document.createElement('span');
+            span.textContent = msg;
+            textWrapper.appendChild(span);
+        }
     }
     contentDiv.appendChild(textWrapper);
+
+    // Görsel varsa ekle
+    if (image) {
+        const imgContainer = document.createElement('div');
+        imgContainer.className = 'message-image-container';
+        const imgEl = document.createElement('img');
+        imgEl.className = 'message-image-content';
+        imgEl.src = image;
+        imgEl.alt = 'Görsel';
+        imgEl.loading = 'lazy';
+        imgEl.title = 'Büyütmek için tıklayın';
+        imgEl.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openImageLightbox(image);
+        });
+        imgContainer.appendChild(imgEl);
+        contentDiv.appendChild(imgContainer);
+    }
+
     div.appendChild(contentDiv);
 
     // 3-dots actions button (always display so all messages can be select/delete managed)
@@ -1745,17 +1858,79 @@ function updateSelectionBarUI() {
 function updatePinnedMessagesBanner() {
     const banner = document.getElementById('pinned-messages-banner');
     const textEl = document.getElementById('pinned-message-text');
+    if (!banner || !textEl) return;
     
     const pinnedMsgs = activeRoomMessages.filter(m => !!m.pinned);
     
     if (pinnedMsgs.length > 0) {
         const latestPin = pinnedMsgs[pinnedMsgs.length - 1];
-        textEl.textContent = `${latestPin.sender}: "${latestPin.text}"`;
+        const previewText = latestPin.text || (latestPin.image ? '📷 [Görsel Paylaşımı]' : '');
+        textEl.textContent = `${latestPin.sender}: "${previewText}"`;
         banner.style.display = 'flex';
     } else {
         banner.style.display = 'none';
     }
 }
+
+// Görsel Ekleme & Yapıştırma Olay Dinleyicileri
+const attachImgBtn = document.getElementById('attach-image-btn');
+const imageFileInput = document.getElementById('image-file-input');
+const removePreviewBtn = document.getElementById('image-preview-remove-btn');
+
+if (attachImgBtn && imageFileInput) {
+    attachImgBtn.addEventListener('click', () => {
+        imageFileInput.click();
+    });
+    imageFileInput.addEventListener('change', (e) => {
+        if (e.target.files && e.target.files[0]) {
+            handleSelectedImageFile(e.target.files[0]);
+        }
+    });
+}
+
+if (removePreviewBtn) {
+    removePreviewBtn.addEventListener('click', () => {
+        clearPendingImage();
+    });
+}
+
+// Panodan (Clipboard) Görsel Yapıştırma Desteği
+if (chatInput) {
+    chatInput.addEventListener('paste', (e) => {
+        const items = (e.clipboardData || e.originalEvent.clipboardData)?.items;
+        if (items) {
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                if (item.kind === 'file' && item.type.startsWith('image/')) {
+                    const blob = item.getAsFile();
+                    handleSelectedImageFile(blob);
+                    e.preventDefault();
+                    break;
+                }
+            }
+        }
+    });
+}
+
+// Lightbox Modal Dinleyicileri
+const lightboxModal = document.getElementById('image-lightbox-modal');
+const lightboxCloseBtn = document.getElementById('lightbox-close-btn');
+
+if (lightboxCloseBtn) {
+    lightboxCloseBtn.addEventListener('click', closeImageLightbox);
+}
+if (lightboxModal) {
+    lightboxModal.addEventListener('click', (e) => {
+        if (e.target === lightboxModal) {
+            closeImageLightbox();
+        }
+    });
+}
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        closeImageLightbox();
+    }
+});
 
 // -----------------------------------------
 // Ses Odaları
@@ -2950,7 +3125,8 @@ document.getElementById('view-pins-btn').addEventListener('click', () => {
             div.style.border = '1px solid rgba(255, 255, 255, 0.05)';
             
             const infoDiv = document.createElement('div');
-            infoDiv.innerHTML = `<strong style="color:#fff;">${msg.sender}:</strong> <span style="color:#dbdee1;">${msg.text}</span>`;
+            let imgHtml = msg.image ? `<br><img src="${msg.image}" style="max-width:120px; max-height:80px; border-radius:4px; margin-top:4px; cursor:pointer; display:block;" onclick="openImageLightbox('${msg.image}')">` : '';
+            infoDiv.innerHTML = `<strong style="color:#fff;">${msg.sender}:</strong> <span style="color:#dbdee1;">${msg.text || ''}</span>${imgHtml}`;
             div.appendChild(infoDiv);
             
             const unpinBtn = document.createElement('button');
