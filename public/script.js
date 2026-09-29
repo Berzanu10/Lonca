@@ -8,8 +8,59 @@ socket.on('connect', () => {
     if (savedRoom && socket.connected) {
         socket.emit('join-text-room', savedRoom);
     }
+    // Ses odasındayken bağlantı koptuysa yeniden odaya ve donanım durumuna senkronize ol
+    if (currentVoiceRoom && socket.connected) {
+        console.log('[Voice] Yeniden bağlanıldı, ses odası senkronize ediliyor:', currentVoiceRoom);
+        socket.emit('join-voice-room', currentVoiceRoom);
+        socket.emit('voice-state-update', { mic: !isMicMuted, deaf: !isDeafened });
+        setTimeout(() => {
+            if (typeof checkAndHealVoice === 'function') checkAndHealVoice();
+        }, 800);
+    }
 });
+
+// P2P Ses sinyali köprüsü üzerinden doğrudan gelen sinyaller
+socket.on('voice-signal', ({ fromPeerId, fromUsername, type, data }) => {
+    if (!currentVoiceRoom || !fromPeerId) return;
+    if (type === 'mesh-ping') {
+        // Karşı taraf ping attı, hâlâ odadayız
+        socket.emit('voice-signal', { toPeerId: fromPeerId, type: 'mesh-pong' });
+    } else if (type === 'request-reconnect') {
+        console.log(`[Voice Signal] ${fromPeerId} kişisinden yeniden bağlanma talebi geldi.`);
+        if (typeof healSpecificPeerConnection === 'function') {
+            healSpecificPeerConnection(fromPeerId);
+        }
+    }
+});
+
 let peer, myPeerId, myUsername;
+
+// Güvenilir STUN ve TURN (OpenRelay) sunucuları listesi
+// Simetrik NAT / Mobil veri / Kısıtlı ağlarda kullanıcıların birbirini duyamama sorununu çözer
+const RTC_ICE_SERVERS = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:global.stun.twilio.com:3478' },
+    { urls: 'stun:openrelay.metered.ca:80' },
+    {
+        urls: 'turn:openrelay.metered.ca:80',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+    },
+    {
+        urls: 'turn:openrelay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+    },
+    {
+        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+    }
+];
 
 let myUserId = localStorage.getItem('userId');
 if (!myUserId) {
@@ -34,6 +85,9 @@ let localVideoStream = null;
 let privateCall = null;
 let voiceCalls = {};
 let allUsersList = {};
+
+// Kullanıcı özel ses seviyesi hafızası (peerId -> 0.0 - 1.0)
+const userAudioVolumes = {};
 
 let activeRoomMessages = [];
 let isSelectionMode = false;
@@ -62,9 +116,116 @@ const VOICE_AUDIO_CONSTRAINTS = {
     latency: { ideal: 0.02, max: 0.1 }
 };
 
-function getVoiceStream() {
-    return navigator.mediaDevices.getUserMedia({ audio: VOICE_AUDIO_CONSTRAINTS, video: false });
+// Cihaz kısıtlamalarına karşı kademeli ve dayanıklı mikrofon akışı edinme
+async function getVoiceStream() {
+    let stream = null;
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: VOICE_AUDIO_CONSTRAINTS, video: false });
+    } catch (err) {
+        console.warn('[Audio] Gelişmiş kısıtlamalarla mikrofon alınamadı, standart ayarlar deneniyor:', err);
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({
+                audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+                video: false
+            });
+        } catch (err2) {
+            console.warn('[Audio] Filtreli mikrofon alınamadı, yalın mikrofon deneniyor:', err2);
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        }
+    }
+
+    if (stream) {
+        attachTrackEndedRecovery(stream);
+    }
+    return stream;
 }
+
+// Kulaklık/Mikrofon takıp çıkarma veya Bluetooth kopmasında otomatik toparlanma
+function attachTrackEndedRecovery(stream) {
+    if (!stream) return;
+    stream.getAudioTracks().forEach(track => {
+        track.onended = async () => {
+            console.warn('[Audio] Mikrofon cihazı kapandı veya değişti. Otomatik yeni mikrofona bağlanılıyor...');
+            if (!currentVoiceRoom) return;
+            try {
+                const newStream = await getVoiceStream();
+                if (newStream) {
+                    localAudioStream = newStream;
+                    applyHardwareStates();
+                    monitorSpeech(localAudioStream, myPeerId);
+
+                    const newTrack = newStream.getAudioTracks()[0];
+                    if (newTrack) {
+                        for (let pId in voiceCalls) {
+                            try {
+                                const pc = voiceCalls[pId].peerConnection;
+                                const sender = pc?.getSenders().find(s => s.track?.kind === 'audio');
+                                if (sender) {
+                                    sender.replaceTrack(newTrack).catch(e => console.warn('replaceTrack uyarısı:', e));
+                                }
+                            } catch(e) {}
+                        }
+                    }
+                }
+            } catch(e) {
+                console.error('[Audio] Yeni mikrofon akışı alınamadı:', e);
+            }
+        };
+    });
+}
+
+// Tarayıcı otomatik ses engelleme (Autoplay policy) uyarı ve kilit açıcı mekanizması
+function showAudioAutoplayBanner() {
+    let banner = document.getElementById('audio-autoplay-banner');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'audio-autoplay-banner';
+        banner.style.cssText = `
+            position: fixed;
+            bottom: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, #5865F2, #4752C4);
+            color: #fff;
+            padding: 10px 20px;
+            border-radius: 8px;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+            z-index: 999999;
+            font-size: 0.88rem;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            transition: all 0.25s ease;
+        `;
+        banner.innerHTML = `<span>🔊 Tarayıcınız sesleri duraklattı. Sesi duymak için sayfada herhangi bir yere tıklayın.</span>`;
+        banner.onclick = unlockAllAudio;
+        document.body.appendChild(banner);
+    }
+    banner.style.display = 'flex';
+}
+
+function hideAudioAutoplayBanner() {
+    const banner = document.getElementById('audio-autoplay-banner');
+    if (banner) banner.style.display = 'none';
+}
+
+function unlockAllAudio() {
+    hideAudioAutoplayBanner();
+    if (audioContext && audioContext.state === 'suspended') {
+        audioContext.resume().catch(() => {});
+    }
+    const audios = audioContainer.querySelectorAll('audio');
+    audios.forEach(a => {
+        if (a.paused) {
+            a.play().catch(() => {});
+        }
+    });
+}
+window.addEventListener('click', unlockAllAudio, { passive: true });
+window.addEventListener('keydown', unlockAllAudio, { passive: true });
+window.addEventListener('touchstart', unlockAllAudio, { passive: true });
 
 async function optimizeVoiceCall(call) {
     try {
@@ -74,14 +235,10 @@ async function optimizeVoiceCall(call) {
 
         const parameters = sender.getParameters();
         parameters.encodings = parameters.encodings?.length ? parameters.encodings : [{}];
-        // Opus için 64 kb/sn konuşma kalitesini korur; bağlantı daralırsa
-        // WebRTC yine uyum sağlar, fakat gereksiz düşük bit hıza sabitlenmez.
         parameters.encodings[0].maxBitrate = 64000;
         parameters.encodings[0].priority = 'high';
         await sender.setParameters(parameters);
     } catch (error) {
-        // Bazı tarayıcılar sender parametrelerini değiştirmeyi desteklemez;
-        // bu durumda WebRTC'nin yerleşik uyarlamalı ayarı kullanılır.
         console.debug('Ses kalitesi ayarı uygulanamadı:', error);
     }
 }
@@ -995,39 +1152,81 @@ if (profileSaveBtn) {
 }
 
 function initializePeer() {
-    if (peer) return;
-    peer = new Peer(undefined, { path: '/peerjs', host: '/', port: location.port || (location.protocol === 'https:' ? 443 : 80) });
+    if (peer && !peer.destroyed) return;
+
+    const isHttps = location.protocol === 'https:';
+    const defaultPort = isHttps ? 443 : 80;
+    const port = location.port ? parseInt(location.port, 10) : defaultPort;
+
+    peer = new Peer(undefined, {
+        path: '/peerjs',
+        host: location.hostname || '/',
+        port: port,
+        secure: isHttps,
+        pingInterval: 5000,
+        config: {
+            iceServers: RTC_ICE_SERVERS,
+            sdpSemantics: 'unified-plan',
+            iceCandidatePoolSize: 10
+        }
+    });
 
     peer.on('open', id => {
         myPeerId = id;
+        console.log('[PeerJS] Bağlantı başarılı, Peer ID:', myPeerId);
         socket.emit('register', myPeerId, myUsername, myUserId, myAvatar, myAdminToken);
         loadServersAndInit(true);
+
+        // Eğer bir ses odasındayken peer yeni id aldıysa veya yeniden bağlandıysa odaya senkronize ol
+        if (currentVoiceRoom && socket.connected) {
+            socket.emit('join-voice-room', currentVoiceRoom);
+            socket.emit('voice-state-update', { mic: !isMicMuted, deaf: !isDeafened });
+            setTimeout(() => {
+                if (typeof checkAndHealVoice === 'function') checkAndHealVoice();
+            }, 500);
+        }
+    });
+
+    peer.on('disconnected', () => {
+        console.warn('[PeerJS] Sinyal sunucusu ile bağlantı kesildi. Otomatik yeniden bağlanılıyor...');
+        if (peer && !peer.destroyed) {
+            try { peer.reconnect(); } catch(e) {}
+        }
+    });
+
+    peer.on('close', () => {
+        console.warn('[PeerJS] Peer tamamen kapandı. Yeniden başlatılıyor...');
+        peer = null;
+        setTimeout(() => initializePeer(), 1000);
+    });
+
+    peer.on('error', err => {
+        console.warn('[PeerJS Hata]:', err ? err.type : err, err ? err.message : '');
+        if (err && (err.type === 'disconnected' || err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error' || err.type === 'socket-closed')) {
+            if (peer && !peer.destroyed && peer.disconnected) {
+                try { peer.reconnect(); } catch (e) {}
+            }
+        } else if (err && err.type === 'unavailable-id') {
+            peer = null;
+            setTimeout(() => initializePeer(), 1000);
+        }
     });
 
     peer.on('call', async call => {
         if (call.metadata && call.metadata.type === 'voice-room') {
-            if (!localAudioStream) {
+            if (!localAudioStream || !localAudioStream.getAudioTracks().some(t => t.readyState === 'live')) {
                 try {
                     localAudioStream = await getVoiceStream();
                     monitorSpeech(localAudioStream, myPeerId);
                     applyHardwareStates();
-                } catch (err) { }
+                } catch (err) {
+                    console.error('[Voice] Gelen aramada mikrofon akışı alınamadı:', err);
+                }
             }
             call.answer(localAudioStream);
-            voiceCalls[call.peer] = call;
-
-
-            call.on('stream', remoteAudio => {
-                optimizeVoiceCall(call);
-                playRemoteAudio(remoteAudio, call.peer);
-                monitorSpeech(remoteAudio, call.peer);
-                if (currentVoiceRoom) playVoiceJoinSound();
-            });
-            call.on('close', () => {
-                removeRemoteAudio(call.peer);
-                stopMonitor(call.peer);
-                if (currentVoiceRoom) playVoiceLeaveSound();
-            });
+            if (typeof handleVoiceRoomCall === 'function') {
+                handleVoiceRoomCall(call, call.peer, true);
+            }
             return;
         }
 
@@ -1087,6 +1286,14 @@ function initializePeer() {
         };
     });
 }
+
+// PeerJS Kalp Atışı: Sekme uzun süre boşta kaldığında sinyal sunucusundan koparsa otomatik kurtarır
+setInterval(() => {
+    if (peer && !peer.destroyed && peer.disconnected) {
+        console.log('[PeerJS Heartbeat] Sinyal bağlantısı kopuk, peer.reconnect() deneniyor...');
+        try { peer.reconnect(); } catch(e) {}
+    }
+}, 4000);
 
 toggleDeafBtn.addEventListener('click', () => {
     isDeafened = !isDeafened;
@@ -1561,9 +1768,20 @@ voiceChannels.forEach(channel => {
     });
 });
 
+let latestVoiceRoomsState = {};
+const lastMeshRetryTimes = {};
+
 async function connectVoiceRoom(room) {
-    // Oda değiştirirken önce önceki akışı kapat. Eski sıralamada yeni alınan
-    // mikrofon akışı disconnectVoiceRoom tarafından durdurulabiliyordu.
+    if (!room) return;
+
+    // Peer bağlantısı hazır değilse başlat veya bekle
+    if (!peer || peer.destroyed) {
+        initializePeer();
+    } else if (peer.disconnected) {
+        try { peer.reconnect(); } catch(e) {}
+    }
+
+    // Oda değiştirirken önce önceki akışı ve çağrıları temiz kapat
     disconnectVoiceRoom(false);
 
     try {
@@ -1571,7 +1789,8 @@ async function connectVoiceRoom(room) {
         monitorSpeech(localAudioStream, myPeerId);
         applyHardwareStates();
     } catch (e) {
-        showCustomAlert("Bağlantı Hatası", "Mikrofon izni olmadan sesli kanalla bağlantı kurulamaz."); return;
+        showCustomAlert("Bağlantı Hatası", "Mikrofon izni olmadan sesli kanalla bağlantı kurulamaz.");
+        return;
     }
 
     currentVoiceRoom = room;
@@ -1596,22 +1815,19 @@ async function connectVoiceRoom(room) {
     socket.emit('join-voice-room', room);
     playVoiceJoinSound();
 
-    // Sunucuya state durumlarımızı hızla güncelletelim ki eksik kalmasın (Undefined Name & Missing State Çözümü)
+    // Sunucuya donanım durumumuzu güncellet
     setTimeout(() => {
         socket.emit('voice-state-update', { mic: !isMicMuted, deaf: !isDeafened });
+        checkAndHealVoice();
     }, 200);
 }
 
+// Odaya girildiğinde odadaki mevcut kullanıcılara doğrudan çağrı başlat
 socket.on('voice-join-success', (usersInRoom) => {
+    console.log('[Voice Mesh] Odaya giriş başarılı, odadaki kullanıcılar:', usersInRoom);
     for (let pId in usersInRoom) {
-        if (pId !== myPeerId) {
-            const call = peer.call(pId, localAudioStream, { metadata: { type: 'voice-room' } });
-            voiceCalls[pId] = call;
-            call.on('stream', remoteAudio => {
-                optimizeVoiceCall(call);
-                playRemoteAudio(remoteAudio, pId); monitorSpeech(remoteAudio, pId);
-            });
-            call.on('close', () => { removeRemoteAudio(pId); stopMonitor(pId); });
+        if (pId && pId !== myPeerId) {
+            callVoicePeer(pId);
         }
     }
 });
@@ -1620,17 +1836,225 @@ socket.on('voice-user-joined', (data) => {
     // Bulunduğumuz ses odasına biri girdiğinde Discord katılma sesini çal
     if (currentVoiceRoom && currentVoiceRoom === data.roomId && data.peerId !== myPeerId) {
         playVoiceJoinSound();
+
+        // Yeni katılan kişinin bize çağrı başlatması beklenir; eğer 3.5 saniye içinde
+        // bağlantı kurulamazsa (örneğin sinyal gecikmesi / NAT durumu) karşı tarafa kendimiz bağlanırız.
+        setTimeout(() => {
+            if (currentVoiceRoom && currentVoiceRoom === data.roomId && data.peerId !== myPeerId) {
+                if (!isCallHealthy(data.peerId)) {
+                    console.log(`[Voice Mesh Fallback] ${data.peerId} ile bağlantı henüz oturmadı, yedek çağrı yapılıyor...`);
+                    callVoicePeer(data.peerId);
+                }
+            }
+        }, 3500);
     }
 });
 
 socket.on('voice-user-left', (data) => {
-    // Bulunduğumuz ses odasından biri ayrıldığında ayrılma sesini çal
+    // Bulunduğumuz ses odasından biri ayrıldığında ayrılma sesini çal ve kaynağı temizle
     if (currentVoiceRoom && currentVoiceRoom === data.roomId && data.peerId !== myPeerId) {
         playVoiceLeaveSound();
+        if (voiceCalls[data.peerId]) {
+            try { voiceCalls[data.peerId].close(); } catch(e) {}
+            delete voiceCalls[data.peerId];
+        }
+        removeRemoteAudio(data.peerId);
+        stopMonitor(data.peerId);
+    }
+});
+
+// P2P Sesli Mesh Bağlantı Yönetimi
+function handleVoiceRoomCall(call, targetPeerId, isIncoming) {
+    if (!call || !targetPeerId) return;
+
+    // Varsa eski veya askıda kalmış önceki çağrıyı temizle
+    if (voiceCalls[targetPeerId] && voiceCalls[targetPeerId] !== call) {
+        try { voiceCalls[targetPeerId].close(); } catch(e) {}
+    }
+    voiceCalls[targetPeerId] = call;
+
+    const onStreamReady = (remoteAudio) => {
+        optimizeVoiceCall(call);
+        playRemoteAudio(remoteAudio, targetPeerId);
+        monitorSpeech(remoteAudio, targetPeerId);
+        if (isIncoming && currentVoiceRoom) {
+            playVoiceJoinSound();
+        }
+    };
+
+    call.on('stream', remoteAudio => {
+        onStreamReady(remoteAudio);
+    });
+
+    call.on('close', () => {
+        removeRemoteAudio(targetPeerId);
+        stopMonitor(targetPeerId);
+        if (voiceCalls[targetPeerId] === call) {
+            delete voiceCalls[targetPeerId];
+        }
+    });
+
+    call.on('error', err => {
+        console.warn(`[VoiceCall Hatası - ${targetPeerId}]:`, err ? err.message : err);
+    });
+
+    // WebRTC PeerConnection durumunu canlı izle ve kopmalarda derhal onar
+    const pc = call.peerConnection;
+    if (pc) {
+        pc.oniceconnectionstatechange = () => {
+            console.log(`[ICE Durumu - ${targetPeerId}]:`, pc.iceConnectionState);
+            if (pc.iceConnectionState === 'failed') {
+                console.warn(`[ICE Failed] ${targetPeerId} ile bağlantı koptu, yeniden bağlanılıyor...`);
+                healSpecificPeerConnection(targetPeerId);
+            }
+        };
+        pc.onconnectionstatechange = () => {
+            console.log(`[Bağlantı Durumu - ${targetPeerId}]:`, pc.connectionState);
+            if (pc.connectionState === 'failed') {
+                console.warn(`[Connection Failed] ${targetPeerId} ile bağlantı koptu, yeniden bağlanılıyor...`);
+                healSpecificPeerConnection(targetPeerId);
+            }
+        };
+    }
+}
+
+async function callVoicePeer(targetPeerId) {
+    if (!currentVoiceRoom || !peer || peer.destroyed || !myPeerId) return;
+    if (targetPeerId === myPeerId) return;
+
+    if (peer.disconnected) {
+        try { peer.reconnect(); } catch(e) {}
+    }
+
+    // Mikrofon akışını garantiye al
+    if (!localAudioStream || !localAudioStream.getAudioTracks().some(t => t.readyState === 'live')) {
+        try {
+            localAudioStream = await getVoiceStream();
+            applyHardwareStates();
+            monitorSpeech(localAudioStream, myPeerId);
+        } catch(e) {
+            console.error('[Voice Mesh] Mikrofon akışı hazır değil:', e);
+            return;
+        }
+    }
+
+    try {
+        console.log(`[Voice Mesh] ${targetPeerId} için arama başlatılıyor...`);
+        const call = peer.call(targetPeerId, localAudioStream, {
+            metadata: { type: 'voice-room', from: myPeerId, room: currentVoiceRoom }
+        });
+        if (call) {
+            handleVoiceRoomCall(call, targetPeerId, false);
+        }
+    } catch(err) {
+        console.warn(`[Voice Mesh] ${targetPeerId} aranamadı:`, err);
+    }
+}
+
+function isCallHealthy(targetPeerId) {
+    const call = voiceCalls[targetPeerId];
+    if (!call) return false;
+    const pc = call.peerConnection;
+    if (!pc) return false;
+    const cState = pc.connectionState;
+    const iceState = pc.iceConnectionState;
+    if (cState === 'connected' || iceState === 'connected' || iceState === 'completed') {
+        return true;
+    }
+    return false;
+}
+
+function healSpecificPeerConnection(targetPeerId) {
+    if (!currentVoiceRoom || targetPeerId === myPeerId) return;
+    const now = Date.now();
+    if (lastMeshRetryTimes[targetPeerId] && now - lastMeshRetryTimes[targetPeerId] < 3000) {
+        return; // Kişi başına 3 saniyelik sınır
+    }
+    lastMeshRetryTimes[targetPeerId] = now;
+
+    if (voiceCalls[targetPeerId]) {
+        try { voiceCalls[targetPeerId].close(); } catch(e) {}
+        delete voiceCalls[targetPeerId];
+    }
+    removeRemoteAudio(targetPeerId);
+    stopMonitor(targetPeerId);
+
+    // Yedek sinyal kanalı üzerinden de bildirim gönder
+    socket.emit('voice-signal', { toPeerId: targetPeerId, type: 'request-reconnect' });
+
+    callVoicePeer(targetPeerId);
+}
+
+// Odadaki tüm kullanıcılar arasında eksiksiz P2P ağ sağlığı kontrolü (Self-Healing Mesh)
+function checkAndHealVoice() {
+    if (!currentVoiceRoom || !myPeerId) return;
+
+    if (peer && !peer.destroyed && peer.disconnected) {
+        try { peer.reconnect(); } catch(e) {}
+    }
+
+    if (audioContext && audioContext.state === 'suspended') {
+        audioContext.resume().catch(() => {});
+    }
+
+    // Duraklatılmış ses öğelerini yeniden oynat
+    audioContainer.querySelectorAll('audio').forEach(ad => {
+        if (ad.paused) {
+            ad.play().catch(() => {});
+        }
+    });
+
+    const currentRoomUsers = latestVoiceRoomsState[currentVoiceRoom];
+    if (!currentRoomUsers) return;
+
+    const peersInRoom = Object.keys(currentRoomUsers).filter(id => id && id !== myPeerId);
+
+    peersInRoom.forEach(peerId => {
+        if (!isCallHealthy(peerId)) {
+            const now = Date.now();
+            const lastRetry = lastMeshRetryTimes[peerId] || 0;
+            const elapsed = now - lastRetry;
+
+            // Çakışmayı (glare) önlemek için deterministik öncelik:
+            // Peer ID'si büyük olan hemen (3.5 sn sonra) çağrı dener, küçük olan ise 6 sn sonra yedek olarak dener.
+            if (myPeerId > peerId) {
+                if (elapsed > 3500) {
+                    console.log(`[Mesh Self-Heal] ${peerId} ile bağlantı eksik, otomatik bağlanılıyor (öncelikli)...`);
+                    healSpecificPeerConnection(peerId);
+                }
+            } else {
+                if (elapsed > 6000) {
+                    console.log(`[Mesh Self-Heal] ${peerId} ile bağlantı eksik, otomatik bağlanılıyor (ikincil)...`);
+                    healSpecificPeerConnection(peerId);
+                }
+            }
+        }
+    });
+
+    // Artık odada olmayan kişilerin eski çağrı ve ses elementlerini temizle
+    for (let callPeerId in voiceCalls) {
+        if (!currentRoomUsers[callPeerId]) {
+            try { voiceCalls[callPeerId].close(); } catch(e) {}
+            delete voiceCalls[callPeerId];
+            removeRemoteAudio(callPeerId);
+            stopMonitor(callPeerId);
+        }
+    }
+}
+
+// 3.5 saniyede bir odayı tarayıp eksik bağlantıları otomatik bağla
+setInterval(checkAndHealVoice, 3500);
+
+// Kullanıcı sekmeye geri döndüğünde anında kontrol et ve bağlantıları iyileştir
+window.addEventListener('focus', checkAndHealVoice);
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        checkAndHealVoice();
     }
 });
 
 socket.on('voice-rooms-state', (voiceRoomsData) => {
+    latestVoiceRoomsState = voiceRoomsData || {};
     document.querySelectorAll('.voice-users').forEach(ul => ul.innerHTML = '');
 
     for (let r in voiceRoomsData) {
@@ -1654,7 +2078,6 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
                 }
 
                 const nameSpan = document.createElement('span');
-                // İsim hatası için garantili MyUsername ataması (undefined sorununu çözer)
                 nameSpan.textContent = userDataObj.username || (id === myPeerId ? myUsername : "Kullanıcı");
                 nameSpan.style.flexGrow = '1';
                 nameSpan.style.fontWeight = '500';
@@ -1663,7 +2086,6 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
                 const statesContainer = document.createElement('div');
                 statesContainer.className = 'voice-user-states';
 
-                // İkonlar her zaman ekranda DURMALI. Sadece kapandığında ".strikethrough-icon" klasını alıp efsanevi çizgi ve kırmızı rengi kendine çeker!
                 const mIcon = document.createElement('div');
                 mIcon.className = (userDataObj.mic === false) ? 'state-icon strikethrough-icon' : 'state-icon';
                 mIcon.innerHTML = micSVG;
@@ -1718,11 +2140,14 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
                     const range = document.createElement('input');
                     range.type = 'range'; range.min = 0; range.max = 1; range.step = 0.05;
                     const existingAudio = document.getElementById('audio-' + id);
-                    range.value = existingAudio ? existingAudio.volume : 1;
+                    const curVol = (userAudioVolumes[id] !== undefined) ? userAudioVolumes[id] : (existingAudio ? existingAudio.volume : 1);
+                    range.value = curVol;
 
                     range.oninput = (e) => {
+                        const val = parseFloat(e.target.value);
+                        userAudioVolumes[id] = val;
                         const au = document.getElementById('audio-' + id);
-                        if (au) au.volume = e.target.value;
+                        if (au) au.volume = val;
                     };
                     volDiv.appendChild(lbl); volDiv.appendChild(range); li.appendChild(volDiv);
 
@@ -1731,6 +2156,10 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
                 ul.appendChild(li);
             }
         }
+    }
+
+    if (currentVoiceRoom) {
+        checkAndHealVoice();
     }
 });
 
@@ -1742,10 +2171,15 @@ function disconnectVoiceRoom(playSound = true) {
     stopScreenSharing();
     screenShareStreams = {};
 
-    for (let id in voiceCalls) voiceCalls[id].close();
+    for (let id in voiceCalls) {
+        try { voiceCalls[id].close(); } catch(e) {}
+    }
     voiceCalls = {};
+
     if (localAudioStream) {
-        localAudioStream.getTracks().forEach(t => t.stop());
+        try {
+            localAudioStream.getTracks().forEach(t => t.stop());
+        } catch(e) {}
         localAudioStream = null;
         stopMonitor(myPeerId);
     }
@@ -1754,6 +2188,17 @@ function disconnectVoiceRoom(playSound = true) {
     document.querySelectorAll('.voice-channel').forEach(c => c.classList.remove('active'));
     voiceConnectionInfo.style.display = 'none';
     currentVoiceRoom = null;
+
+    try {
+        const audios = audioContainer.querySelectorAll('audio');
+        audios.forEach(ad => {
+            try {
+                ad.pause();
+                ad.srcObject = null;
+            } catch(e) {}
+            ad.remove();
+        });
+    } catch(e) {}
     audioContainer.innerHTML = '';
 }
 
@@ -1855,18 +2300,46 @@ function playChimeTone(ac, freq, startTime, duration, decayTime, gainVal) {
 }
 
 function playRemoteAudio(stream, peerId) {
+    if (!stream) return;
     let ad = document.getElementById('audio-' + peerId);
     if (!ad) {
         ad = document.createElement('audio');
-        ad.id = 'audio-' + peerId; ad.autoplay = true;
+        ad.id = 'audio-' + peerId;
+        ad.autoplay = true;
+        ad.playsInline = true;
         audioContainer.appendChild(ad);
     }
-    ad.srcObject = stream;
+    if (ad.srcObject !== stream) {
+        ad.srcObject = stream;
+    }
+    const savedVol = (userAudioVolumes[peerId] !== undefined) ? userAudioVolumes[peerId] : 1.0;
+    ad.volume = savedVol;
     ad.muted = isDeafened;
+
+    // Uzaktaki ses izlerinin açık ve çalışır olduğundan emin ol
+    try {
+        stream.getAudioTracks().forEach(t => { t.enabled = true; });
+    } catch(e) {}
+
+    // Doğrudan play() çağır ve tarayıcı autoplay kısıtlamalarını ele al
+    const playPromise = ad.play();
+    if (playPromise !== undefined) {
+        playPromise.catch(err => {
+            console.warn(`[Audio Autoplay] audio-${peerId} otomatik oynatma kısıtlandı:`, err ? err.message : err);
+            showAudioAutoplayBanner();
+        });
+    }
 }
+
 function removeRemoteAudio(peerId) {
     const ad = document.getElementById('audio-' + peerId);
-    if (ad) ad.remove();
+    if (ad) {
+        try {
+            ad.pause();
+            ad.srcObject = null;
+        } catch(e) {}
+        ad.remove();
+    }
 }
 
 // -----------------------------------------

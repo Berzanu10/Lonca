@@ -41,11 +41,16 @@ const io = new Server(server, {
 
 const { ExpressPeerServer } = require('peer');
 
-// PeerJS için CORS ayarları eklendi
+// PeerJS için ayarlar (uzun süre bağlı kalmayı destekleyen heartbeat ve güvenli CORS)
 const peerServer = ExpressPeerServer(server, {
-   debug: true,
+   debug: false,
    path: '/',
+   alive_timeout: 60000,
    corsOptions: { origin: '*' }
+});
+
+peerServer.on('error', (err) => {
+   console.warn('[PeerServer Hatası]:', err ? err.message : err);
 });
 
 app.use('/peerjs', peerServer);
@@ -1302,7 +1307,9 @@ io.on('connection', (socket) => {
       const prevRoom = socket.voiceRoom;
       if (prevRoom && prevRoom !== roomId) {
          socket.leave('voice-' + prevRoom);
-         if (voiceRooms[prevRoom]) delete voiceRooms[prevRoom][socket.peerId];
+         if (socket.peerId && voiceRooms[prevRoom]) {
+            delete voiceRooms[prevRoom][socket.peerId];
+         }
          socket.to('voice-' + prevRoom).emit('voice-user-left', {
             peerId: socket.peerId,
             username: socket.username,
@@ -1314,25 +1321,41 @@ io.on('connection', (socket) => {
       if (roomId) {
          if (!voiceRooms[roomId]) voiceRooms[roomId] = {};
 
+         // Odaya yeni katılan kişiye odadaki mevcut diğer kişilerin listesini ilet
          socket.emit('voice-join-success', voiceRooms[roomId]);
 
-         // Artık odada sadece ismimizi değil, donanım (mikrofon/kulaklık) verimizi de tutuyoruz!
-         voiceRooms[roomId][socket.peerId] = {
-            username: socket.username,
-            mic: socket.voiceState.mic,
-            deaf: socket.voiceState.deaf,
-            avatar: socket.avatar || ''
-         };
+         if (socket.peerId) {
+            voiceRooms[roomId][socket.peerId] = {
+               username: socket.username,
+               mic: socket.voiceState ? socket.voiceState.mic : true,
+               deaf: socket.voiceState ? socket.voiceState.deaf : false,
+               avatar: socket.avatar || ''
+            };
 
-         socket.join('voice-' + roomId);
-         // Odadaki diğer kullanıcılara Discord gibi birinin girdiğini bildir
-         socket.to('voice-' + roomId).emit('voice-user-joined', {
-            peerId: socket.peerId,
-            username: socket.username,
-            roomId: roomId
-         });
+            socket.join('voice-' + roomId);
+            // Odadaki diğer kullanıcılara birinin girdiğini bildir
+            socket.to('voice-' + roomId).emit('voice-user-joined', {
+               peerId: socket.peerId,
+               username: socket.username,
+               roomId: roomId
+            });
+         }
       }
       io.emit('voice-rooms-state', voiceRooms);
+   });
+
+   // P2P Ses Mesh Doğrudan Sinyalleşme ve Yeniden Bağlantı Köprüsü
+   socket.on('voice-signal', ({ toPeerId, type, data }) => {
+      if (!toPeerId) return;
+      const targetSocket = [...io.sockets.sockets.values()].find(s => s.peerId === toPeerId);
+      if (targetSocket) {
+         targetSocket.emit('voice-signal', {
+            fromPeerId: socket.peerId,
+            fromUsername: socket.username,
+            type,
+            data
+         });
+      }
    });
 
    socket.on('get-voice-state', () => {
