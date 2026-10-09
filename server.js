@@ -970,12 +970,14 @@ for (let r in textRooms) {
 const mongoose = require('mongoose');
 let isMongoConnected = false;
 let MessageModel = null;
+let DeletedMessageModel = null;
 
 try {
    const messageSchema = new mongoose.Schema({
       id: { type: String, required: true, unique: true, index: true },
       roomId: { type: String, required: true, index: true },
       sender: { type: String, required: true },
+      senderId: { type: String, default: null },
       text: { type: String, default: '' },
       image: { type: String, default: null },
       timestamp: { type: Number, required: true },
@@ -985,8 +987,76 @@ try {
    }, { timestamps: true });
 
    MessageModel = mongoose.models.Message || mongoose.model('Message', messageSchema);
+
+   const deletedMessageSchema = new mongoose.Schema({
+      id: { type: String, required: true, unique: true, index: true },
+      deletedAt: { type: Number, default: () => Date.now() },
+      deletedBy: { type: String, default: '' }
+   }, { timestamps: true });
+
+   DeletedMessageModel = mongoose.models.DeletedMessage || mongoose.model('DeletedMessage', deletedMessageSchema);
 } catch (e) {
    console.error("[MongoDB] Model oluşturulurken hata:", e);
+}
+
+// -------------------------------------------------------------
+// SİLİNEN MESAJLAR (TOMBSTONE) YÖNETİMİ
+// Sunucu yeniden başladığında silinen mesajların geri gelmesini kesin olarak engeller.
+// -------------------------------------------------------------
+const DELETED_MESSAGES_FILE = path.join(__dirname, 'deleted_messages.json');
+let deletedMessageIds = new Set();
+try {
+   if (fs.existsSync(DELETED_MESSAGES_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(DELETED_MESSAGES_FILE, 'utf8'));
+      if (Array.isArray(parsed)) {
+         deletedMessageIds = new Set(parsed);
+      }
+   } else {
+      fs.writeFileSync(DELETED_MESSAGES_FILE, JSON.stringify([]), 'utf8');
+   }
+} catch (err) {
+   console.error("Silinen mesajlar yüklenirken hata oluştu:", err);
+}
+
+function saveDeletedMessagesLocally() {
+   try {
+      fs.writeFileSync(DELETED_MESSAGES_FILE, JSON.stringify([...deletedMessageIds], null, 2), 'utf8');
+   } catch (err) {
+      console.error("Silinen mesajlar kaydedilirken hata oluştu:", err);
+   }
+}
+
+function canUserDeleteMessage(socket, roomId, msg) {
+   if (!socket) return false;
+   if (socket.isAdmin) return true;
+   const uId = socket.userId;
+   if (!uId) return false;
+
+   // 1. Kullanıcı kendi attığı mesajı silebilir
+   if (msg && (msg.senderId === uId || msg.sender === socket.username)) {
+      return true;
+   }
+
+   // 2. Kullanıcı sunucu sahibi ise o sunucudaki tüm mesajları silebilir
+   if (roomId) {
+      if (roomId.startsWith('serverChannel_')) {
+         for (const sId in serversDb) {
+            if (roomId.startsWith(`serverChannel_${sId}_`)) {
+               if (serversDb[sId] && (serversDb[sId].ownerId === uId)) return true;
+            }
+         }
+      } else if (['genel', 'oyun', 'muzik', 'koordinatlar'].includes(roomId)) {
+         if (serversDb['server_default'] && (serversDb['server_default'].ownerId === uId)) return true;
+      }
+   }
+
+   for (const sId in serversDb) {
+      if (serversDb[sId] && serversDb[sId].ownerId === uId) {
+         if (roomId && roomId.includes(sId)) return true;
+      }
+   }
+
+   return false;
 }
 
 const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URL || process.env.MONGO_URI || process.env.MONGODB_URL;
@@ -1024,11 +1094,40 @@ if (MONGODB_URI) {
 async function syncMessagesWithMongo() {
    if (!isMongoConnected || !MessageModel) return;
    try {
-      // 1. Buluttaki tüm mesajları çek
-      const docs = await MessageModel.find({}).sort({ timestamp: 1 }).lean();
+      // 1. Buluttaki tüm silinmiş mesaj ID'lerini çek ve yerel sete ekle
+      if (DeletedMessageModel) {
+         const deletedDocs = await DeletedMessageModel.find({}).lean();
+         if (deletedDocs && deletedDocs.length > 0) {
+            deletedDocs.forEach(d => {
+               if (d && d.id) deletedMessageIds.add(d.id);
+            });
+            saveDeletedMessagesLocally();
+         }
+         // Yerelde silinmiş kayıtları da DeletedMessageModel'e yaz ve MessageModel'den tamamen sil
+         if (deletedMessageIds.size > 0) {
+            const bulkTombstones = [...deletedMessageIds].map(id => ({
+               updateOne: {
+                  filter: { id },
+                  update: { $set: { id } },
+                  upsert: true
+               }
+            }));
+            await DeletedMessageModel.bulkWrite(bulkTombstones).catch(() => {});
+            await MessageModel.deleteMany({ id: { $in: [...deletedMessageIds] } }).catch(() => {});
+         }
+      }
+
+      // 2. Bellekteki silinmiş mesajları temizle
+      for (const r in messageHistory) {
+         messageHistory[r] = messageHistory[r].filter(m => m && m.id && !deletedMessageIds.has(m.id));
+      }
+
+      // 3. Buluttaki aktif mesajları çek (silinenler hariç)
+      const docs = await MessageModel.find({ id: { $nin: [...deletedMessageIds] } }).sort({ timestamp: 1 }).lean();
       if (docs && docs.length > 0) {
          let importedCount = 0;
          docs.forEach(doc => {
+            if (!doc || !doc.id || deletedMessageIds.has(doc.id)) return;
             const rId = doc.roomId;
             if (!messageHistory[rId]) messageHistory[rId] = [];
             const exists = messageHistory[rId].some(m => m.id === doc.id);
@@ -1036,6 +1135,7 @@ async function syncMessagesWithMongo() {
                messageHistory[rId].push({
                   id: doc.id,
                   sender: doc.sender,
+                  senderId: doc.senderId || null,
                   text: doc.text || '',
                   image: doc.image || null,
                   timestamp: doc.timestamp,
@@ -1049,11 +1149,12 @@ async function syncMessagesWithMongo() {
          console.log(`[MongoDB] ${importedCount} adet bulut mesajı yerel belleğe yüklendi.`);
       }
 
-      // 2. Sadece MongoDB'de henüz bulunmayan yerel mesajları buluta kaydet
+      // 4. Sadece silinmemiş ve henüz MongoDB'de bulunmayan yerel mesajları buluta yükle
       const existingMongoIds = new Set((docs || []).map(d => d.id));
       const newMessagesToUpload = [];
       for (const roomId in messageHistory) {
          for (const msg of messageHistory[roomId]) {
+            if (!msg || !msg.id || deletedMessageIds.has(msg.id)) continue;
             if (!existingMongoIds.has(msg.id)) {
                newMessagesToUpload.push({
                   updateOne: {
@@ -1063,6 +1164,7 @@ async function syncMessagesWithMongo() {
                            id: msg.id,
                            roomId: roomId,
                            sender: msg.sender,
+                           senderId: msg.senderId || null,
                            text: msg.text || '',
                            image: msg.image || null,
                            timestamp: msg.timestamp,
@@ -1082,11 +1184,11 @@ async function syncMessagesWithMongo() {
          console.log(`[MongoDB] ${newMessagesToUpload.length} adet yeni yerel mesaj buluta aktarıldı.`);
       }
 
-      // 3. Ayna kanalları eşitle (genel <-> serverChannel_server_default_genel)
+      // 5. Ayna kanalları eşitle ve kaydet
       migrateOldChannels();
       saveMessagesLocally();
 
-      // 4. Bağlı kullanıcılara güncel mesaj geçmişini anında ilet
+      // 6. Bağlı kullanıcılara güncel mesaj geçmişini anında ilet
       if (typeof io !== 'undefined' && io.sockets && io.sockets.sockets) {
          for (const [id, s] of io.sockets.sockets) {
             if (s.textRoom && messageHistory[s.textRoom]) {
@@ -1148,14 +1250,21 @@ try {
       const fileContent = fs.readFileSync(MESSAGES_FILE, 'utf8');
       messageHistory = JSON.parse(fileContent);
       let dirty = false;
-      for (let r in textRooms) {
-         if (!messageHistory[r]) messageHistory[r] = [];
+      for (let r in messageHistory) {
+         const origLen = messageHistory[r].length;
+         // Silinmiş mesajları ayıkla
+         messageHistory[r] = messageHistory[r].filter(msg => msg && msg.id && !deletedMessageIds.has(msg.id));
+         if (messageHistory[r].length !== origLen) dirty = true;
+
          messageHistory[r].forEach(msg => {
             if (!msg.id) {
                msg.id = 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
                dirty = true;
             }
          });
+      }
+      for (let r in textRooms) {
+         if (!messageHistory[r]) messageHistory[r] = [];
       }
       migrateOldChannels();
       if (dirty) {
@@ -1173,7 +1282,12 @@ try {
 
 function saveMessagesLocally() {
    try {
-      fs.writeFileSync(MESSAGES_FILE, JSON.stringify(messageHistory, null, 2), 'utf8');
+      // Sadece silinmemiş mesajları kaydet
+      const cleaned = {};
+      for (const r in messageHistory) {
+         cleaned[r] = (messageHistory[r] || []).filter(m => m && m.id && !deletedMessageIds.has(m.id));
+      }
+      fs.writeFileSync(MESSAGES_FILE, JSON.stringify(cleaned, null, 2), 'utf8');
    } catch (err) {
       console.error("Mesajlar kaydedilirken hata oluştu:", err);
    }
@@ -1182,14 +1296,15 @@ function saveMessagesLocally() {
 function saveMessages(roomId, msgObj) {
    saveMessagesLocally();
 
-   // Buluta asenkron kaydet
-   if (isMongoConnected && MessageModel && msgObj && roomId) {
+   // Buluta asenkron kaydet (silinmiş değilse)
+   if (isMongoConnected && MessageModel && msgObj && roomId && !deletedMessageIds.has(msgObj.id)) {
       MessageModel.findOneAndUpdate(
          { id: msgObj.id },
          {
             id: msgObj.id,
             roomId: roomId,
             sender: msgObj.sender,
+            senderId: msgObj.senderId || null,
             text: msgObj.text || '',
             image: msgObj.image || null,
             timestamp: msgObj.timestamp,
@@ -1302,14 +1417,20 @@ io.on('connection', (socket) => {
             const queryRooms = [roomId];
             if (mirrorMap[roomId]) queryRooms.push(mirrorMap[roomId]);
 
-            const docs = await MessageModel.find({ roomId: { $in: queryRooms } }).sort({ timestamp: 1 }).lean();
+            const docs = await MessageModel.find({ 
+               roomId: { $in: queryRooms },
+               id: { $nin: [...deletedMessageIds] }
+            }).sort({ timestamp: 1 }).lean();
+
             if (docs && docs.length > 0) {
                if (!messageHistory[roomId]) messageHistory[roomId] = [];
                docs.forEach(doc => {
+                  if (!doc || !doc.id || deletedMessageIds.has(doc.id)) return;
                   if (!messageHistory[roomId].some(m => m.id === doc.id)) {
                      messageHistory[roomId].push({
                         id: doc.id,
                         sender: doc.sender,
+                        senderId: doc.senderId || null,
                         text: doc.text || '',
                         image: doc.image || null,
                         timestamp: doc.timestamp,
@@ -1319,6 +1440,7 @@ io.on('connection', (socket) => {
                      });
                   }
                });
+               messageHistory[roomId] = messageHistory[roomId].filter(m => m && m.id && !deletedMessageIds.has(m.id));
                messageHistory[roomId].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
 
                // Ayna odayı da senkronize et
@@ -1326,10 +1448,12 @@ io.on('connection', (socket) => {
                   const mRoom = mirrorMap[roomId];
                   if (!messageHistory[mRoom]) messageHistory[mRoom] = [];
                   docs.forEach(doc => {
+                     if (!doc || !doc.id || deletedMessageIds.has(doc.id)) return;
                      if (!messageHistory[mRoom].some(m => m.id === doc.id)) {
                         messageHistory[mRoom].push({
                            id: doc.id,
                            sender: doc.sender,
+                           senderId: doc.senderId || null,
                            text: doc.text || '',
                            image: doc.image || null,
                            timestamp: doc.timestamp,
@@ -1339,6 +1463,7 @@ io.on('connection', (socket) => {
                         });
                      }
                   });
+                  messageHistory[mRoom] = messageHistory[mRoom].filter(m => m && m.id && !deletedMessageIds.has(m.id));
                   messageHistory[mRoom].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
                }
             }
@@ -1347,10 +1472,12 @@ io.on('connection', (socket) => {
          }
       }
 
-      // Emit chat history to user
+      // Emit chat history to user (silinenler hariç)
       if (!messageHistory[roomId]) {
          messageHistory[roomId] = [];
          saveMessagesLocally();
+      } else {
+         messageHistory[roomId] = messageHistory[roomId].filter(m => m && m.id && !deletedMessageIds.has(m.id));
       }
       socket.emit('chat-history', messageHistory[roomId]);
    });
@@ -1373,6 +1500,7 @@ io.on('connection', (socket) => {
          const msgObj = {
             id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
             sender: socket.username,
+            senderId: socket.userId || null,
             text: text,
             image: image,
             timestamp: Date.now()
@@ -1431,22 +1559,56 @@ io.on('connection', (socket) => {
    });
 
    socket.on('delete-message', (msgId) => {
-      if (!socket.isAdmin) return;
+      if (!msgId) return;
+      let targetRoom = socket.textRoom || null;
+      let targetMsg = null;
+
+      for (let room in messageHistory) {
+         const m = messageHistory[room].find(x => x.id === msgId);
+         if (m) {
+            targetRoom = room;
+            targetMsg = m;
+            break;
+         }
+      }
+
+      if (!targetMsg && !socket.isAdmin) {
+         return;
+      }
+
+      if (targetMsg && !canUserDeleteMessage(socket, targetRoom, targetMsg)) {
+         return;
+      }
+
+      // Kalıcı silme kaydı (Tombstone)
+      deletedMessageIds.add(msgId);
+      saveDeletedMessagesLocally();
+
       let deleted = false;
       for (let room in messageHistory) {
-         const index = messageHistory[room].findIndex(m => m.id === msgId);
-         if (index !== -1) {
-            messageHistory[room].splice(index, 1);
+         const prevLen = messageHistory[room].length;
+         messageHistory[room] = messageHistory[room].filter(m => m.id !== msgId);
+         if (messageHistory[room].length !== prevLen) {
             deleted = true;
          }
       }
-      if (deleted) {
-         saveMessagesLocally();
-         if (isMongoConnected && MessageModel) {
+
+      saveMessagesLocally();
+
+      if (isMongoConnected) {
+         if (MessageModel) {
             MessageModel.deleteMany({ id: msgId }).catch(() => {});
          }
-         io.emit('message-deleted', msgId);
+         if (DeletedMessageModel) {
+            DeletedMessageModel.updateOne(
+               { id: msgId },
+               { $set: { id: msgId, deletedBy: socket.username || socket.userId || 'admin', deletedAt: Date.now() } },
+               { upsert: true }
+            ).catch(() => {});
+         }
       }
+
+      io.emit('message-deleted', msgId);
    });
 
    // SES ODASI GİRİŞ KONTROLLERİ VE DONANIM BİLGİSİ YAYINI
@@ -1643,15 +1805,61 @@ io.on('connection', (socket) => {
    });
 
    socket.on('bulk-delete-messages', (msgIds) => {
-      if (!socket.isAdmin) return;
-      let roomId = socket.textRoom;
-      if (!roomId || !Array.isArray(msgIds)) return;
-      messageHistory[roomId] = messageHistory[roomId].filter(m => !msgIds.includes(m.id));
-      saveMessagesLocally();
-      if (isMongoConnected && MessageModel) {
-         MessageModel.deleteMany({ id: { $in: msgIds } }).catch(() => {});
+      if (!Array.isArray(msgIds) || msgIds.length === 0) return;
+
+      const deletedIds = [];
+      const currentRoom = socket.textRoom;
+
+      for (const msgId of msgIds) {
+         let targetRoom = currentRoom;
+         let targetMsg = null;
+
+         for (let room in messageHistory) {
+            const m = messageHistory[room].find(x => x.id === msgId);
+            if (m) {
+               targetRoom = room;
+               targetMsg = m;
+               break;
+            }
+         }
+
+         if (targetMsg) {
+            if (canUserDeleteMessage(socket, targetRoom, targetMsg)) {
+               deletedIds.push(msgId);
+               deletedMessageIds.add(msgId);
+            }
+         } else if (socket.isAdmin) {
+            deletedIds.push(msgId);
+            deletedMessageIds.add(msgId);
+         }
       }
-      io.to('text-' + roomId).emit('messages-bulk-deleted', msgIds);
+
+      if (deletedIds.length > 0) {
+         saveDeletedMessagesLocally();
+
+         for (let room in messageHistory) {
+            messageHistory[room] = messageHistory[room].filter(m => !deletedIds.includes(m.id));
+         }
+         saveMessagesLocally();
+
+         if (isMongoConnected) {
+            if (MessageModel) {
+               MessageModel.deleteMany({ id: { $in: deletedIds } }).catch(() => {});
+            }
+            if (DeletedMessageModel) {
+               const bulkTombstones = deletedIds.map(id => ({
+                  updateOne: {
+                     filter: { id },
+                     update: { $set: { id, deletedBy: socket.username || socket.userId || 'admin', deletedAt: Date.now() } },
+                     upsert: true
+                  }
+               }));
+               DeletedMessageModel.bulkWrite(bulkTombstones).catch(() => {});
+            }
+         }
+
+         io.emit('messages-bulk-deleted', deletedIds);
+      }
    });
 
    socket.on('start-screen-share', () => {
