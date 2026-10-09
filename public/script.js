@@ -104,39 +104,69 @@ let isMicMuted = false;
 let isDeafened = false;
 let prevMicMuted = false;
 
-// Sesli sohbet, müzik yerine insan konuşmasına göre ayarlanır. 48 kHz Opus,
-// yankı/arka plan gürültüsü azaltma ve otomatik mikrofon seviyesi sağlar.
+// Sesli sohbet, müzik yerine insan konuşmasına göre ayarlanır.
+// Değerler ideal tutulur; zorunlu sampleRate/latency bazı tarayıcılarda
+// izin penceresini açmadan isteği reddeder.
 const VOICE_AUDIO_CONSTRAINTS = {
-    echoCancellation: true,
-    noiseSuppression: true,
-    autoGainControl: true,
-    channelCount: 1,
-    sampleRate: 48000,
-    sampleSize: 16,
-    latency: { ideal: 0.02, max: 0.1 }
+    echoCancellation: { ideal: true },
+    noiseSuppression: { ideal: true },
+    autoGainControl: { ideal: true },
+    channelCount: { ideal: 1 },
+    sampleRate: { ideal: 48000 }
 };
 
-// Cihaz kısıtlamalarına karşı kademeli ve dayanıklı mikrofon akışı edinme
+const MIC_GRANT_COOKIE = 'lonca_mic';
+
+function rememberMicGrant() {
+    setCookie(MIC_GRANT_COOKIE, '1', 365);
+}
+
+function hasRememberedMicGrant() {
+    return getCookie(MIC_GRANT_COOKIE) === '1';
+}
+
+function micErrorMessage(err) {
+    const name = err && err.name;
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+        if (hasRememberedMicGrant()) {
+            return 'Mikrofon izni bu tarayıcıda kayıtlı ama şu an açılamadı. Adres çubuğundaki kilit simgesinden mikrofonun izinli olduğunu kontrol edin.';
+        }
+        return 'Sesli kanala girmek için tarayıcının açtığı pencereden mikrofona izin verin. İzin bir kez verilince hatırlanır, tekrar sorulmaz.';
+    }
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+        return 'Bu cihazda kullanılabilir bir mikrofon bulunamadı.';
+    }
+    if (name === 'NotReadableError' || name === 'TrackStartError') {
+        return 'Mikrofon başka bir uygulama tarafından kullanılıyor olabilir.';
+    }
+    if (name === 'NotSupportedError' || name === 'SecurityError') {
+        return 'Bu sayfada mikrofon kullanılamıyor. Siteyi güvenli bağlantı ile açın.';
+    }
+    return 'Mikrofon açılamadı. Tarayıcının izin penceresinden mikrofona izin verin.';
+}
+
+// İlk istek sade olmalı ki tarayıcı izin penceresini tıklamanın içinde açsın.
+// İzin verilince çereze yazılır; sonraki girişlerde tarayıcı yeniden sormaz.
 async function getVoiceStream() {
-    let stream = null;
-    try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: VOICE_AUDIO_CONSTRAINTS, video: false });
-    } catch (err) {
-        console.warn('[Audio] Gelişmiş kısıtlamalarla mikrofon alınamadı, standart ayarlar deneniyor:', err);
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        const err = new Error('Mikrofon bu sayfada kullanılamıyor.');
+        err.name = 'NotSupportedError';
+        throw err;
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    rememberMicGrant();
+
+    const track = stream.getAudioTracks()[0];
+    if (track && typeof track.applyConstraints === 'function') {
         try {
-            stream = await navigator.mediaDevices.getUserMedia({
-                audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-                video: false
-            });
-        } catch (err2) {
-            console.warn('[Audio] Filtreli mikrofon alınamadı, yalın mikrofon deneniyor:', err2);
-            stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            await track.applyConstraints(VOICE_AUDIO_CONSTRAINTS);
+        } catch (err) {
+            console.warn('[Audio] Gelişmiş ses ayarları uygulanamadı, temel mikrofon kullanılıyor:', err);
         }
     }
 
-    if (stream) {
-        attachTrackEndedRecovery(stream);
-    }
+    attachTrackEndedRecovery(stream);
     return stream;
 }
 
@@ -479,7 +509,8 @@ function setCookie(name, value, days) {
         date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
         expires = "; expires=" + date.toUTCString();
     }
-    document.cookie = name + "=" + (value || "")  + expires + "; path=/";
+    const secure = location.protocol === 'https:' ? '; Secure' : '';
+    document.cookie = name + "=" + (value || "") + expires + "; path=/; SameSite=Lax" + secure;
 }
 
 function getCookie(name) {
@@ -1333,7 +1364,14 @@ function applyHardwareStates() {
 // Global Sağ Liste - KULLANICILAR
 // -----------------------------------------
 socket.on('global-users', (usersObj) => {
-    allUsersList = usersObj;
+    allUsersList = usersObj || {};
+    if (activeServerId && activeServerId !== 'home') {
+        const server = joinedServers.find(s => s.id === activeServerId);
+        if (server) {
+            updateServerUsersList(server);
+            return;
+        }
+    }
     usersList.innerHTML = '';
 
     const sortedIds = Object.keys(allUsersList).sort((a, b) => {
@@ -1974,7 +2012,8 @@ async function connectVoiceRoom(room) {
         monitorSpeech(localAudioStream, myPeerId);
         applyHardwareStates();
     } catch (e) {
-        showCustomAlert("Bağlantı Hatası", "Mikrofon izni olmadan sesli kanalla bağlantı kurulamaz.");
+        console.warn('[Voice] Mikrofon alınamadı:', e);
+        showCustomAlert("Mikrofon", micErrorMessage(e));
         return;
     }
 

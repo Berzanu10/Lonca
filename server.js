@@ -584,6 +584,17 @@ app.post('/api/users/profile', authenticateToken, (req, res) => {
 
    saveUsers();
 
+   rememberEntrant(userId, {
+      username: user.username,
+      avatar: user.avatar || '',
+      isAdmin: !!user.isAdmin,
+      isOnline: !!(allTimeUsers[userId] && allTimeUsers[userId].isOnline),
+      peerId: allTimeUsers[userId] ? allTimeUsers[userId].peerId : null
+   }, seenUsers[userId] && seenUsers[userId].servers && seenUsers[userId].servers.length
+      ? seenUsers[userId].servers
+      : ['server_default']);
+   io.emit('global-users', allTimeUsers);
+
    res.json({
       success: true,
       user: {
@@ -600,14 +611,14 @@ app.post('/api/users/profile', authenticateToken, (req, res) => {
 // GET USER BY ID
 app.get('/api/users/:userId', authenticateToken, (req, res) => {
    const { userId } = req.params;
-   const user = usersDb[userId];
+   const user = usersDb[userId] || seenUsers[userId];
    if (!user) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
    res.json({
       success: true,
       user: {
-         id: user.id,
+         id: user.id || user.userId,
          username: user.username,
-         avatar: user.avatar || '',
+         avatar: rosterAvatar(userId, user.avatar || ''),
          bio: user.bio || ''
       }
    });
@@ -722,6 +733,19 @@ app.post('/api/servers/join', authenticateToken, (req, res) => {
    server.members.push(userId);
    saveServers();
 
+   const joinedUser = usersDb[userId];
+   if (joinedUser) {
+      rememberEntrant(userId, {
+         username: joinedUser.username,
+         avatar: joinedUser.avatar || '',
+         isAdmin: !!joinedUser.isAdmin,
+         isOnline: !!(allTimeUsers[userId] && allTimeUsers[userId].isOnline),
+         peerId: allTimeUsers[userId] ? allTimeUsers[userId].peerId : null
+      }, [server.id]);
+      io.emit('global-users', allTimeUsers);
+   }
+   io.emit('server-update', server.id, server);
+
    res.json({ success: true, server });
 });
 
@@ -767,6 +791,13 @@ app.post('/api/servers/:serverId/leave', authenticateToken, (req, res) => {
 
    server.members = server.members.filter(m => m !== userId);
    saveServers();
+
+   if (seenUsers[userId]) {
+      seenUsers[userId].servers = (seenUsers[userId].servers || []).filter(id => id !== serverId);
+      seenUsers[userId].lastSeen = Date.now();
+      saveSeenUsersLocally();
+      persistSeenUserMongo(seenUsers[userId]);
+   }
 
    // Broadcast update to remaining members
    io.emit('server-update', serverId, server);
@@ -971,6 +1002,7 @@ const mongoose = require('mongoose');
 let isMongoConnected = false;
 let MessageModel = null;
 let DeletedMessageModel = null;
+let SeenUserModel = null;
 
 try {
    const messageSchema = new mongoose.Schema({
@@ -995,6 +1027,17 @@ try {
    }, { timestamps: true });
 
    DeletedMessageModel = mongoose.models.DeletedMessage || mongoose.model('DeletedMessage', deletedMessageSchema);
+
+   const seenUserSchema = new mongoose.Schema({
+      userId: { type: String, required: true, unique: true, index: true },
+      username: { type: String, required: true },
+      avatar: { type: String, default: '' },
+      isAdmin: { type: Boolean, default: false },
+      lastSeen: { type: Number, default: 0 },
+      servers: { type: [String], default: [] }
+   }, { timestamps: true });
+
+   SeenUserModel = mongoose.models.SeenUser || mongoose.model('SeenUser', seenUserSchema);
 } catch (e) {
    console.error("[MongoDB] Model oluşturulurken hata:", e);
 }
@@ -1084,6 +1127,7 @@ if (MONGODB_URI) {
       isMongoConnected = true;
       console.log('✅ [MongoDB] Bulut veritabanına başarıyla bağlanıldı! Mesajlar Render kapansa dahi kalıcı saklanacak.');
       await syncMessagesWithMongo();
+      await syncSeenUsersWithMongo();
    }).catch(err => {
       console.error('❌ [MongoDB] Bağlantı hatası, yerel dosya sistemi (JSON) kullanılacak:', err.message);
    });
@@ -1321,24 +1365,365 @@ function saveMessages(roomId, msgObj) {
 
 const allTimeUsers = {};
 
-// Sunucu başlarken tüm kayıtlı kullanıcıları offline olarak yükle
-// Böylece hiç bağlanmamış kullanıcılar da sağ panelde görünür
+function isFixtureAccount(user) {
+   if (!user) return false;
+   const email = (user.email || '').toLowerCase();
+   if (email.endsWith('@example.com') || email.endsWith('@domain.com')) return true;
+   if (typeof user.googleId === 'string' && user.googleId.startsWith('mock_google_')) return true;
+   return false;
+}
+
+// Kayıtlı gerçek hesaplar çevrimdışı listede durur. Eski sahte test hesapları
+// sağ panele yazılmaz; biri gerçekten girerse o anda listeye eklenir.
 function initAllTimeUsersFromDb() {
    for (const uId in usersDb) {
       const u = usersDb[uId];
-      if (!allTimeUsers[uId]) {
-         allTimeUsers[uId] = {
-            username: u.username,
-            isOnline: false,
-            peerId: null,
-            userId: uId,
-            avatar: u.avatar || '',
-            isAdmin: u.isAdmin || false
-         };
-      }
+      if (!u || isFixtureAccount(u) || allTimeUsers[uId]) continue;
+      allTimeUsers[uId] = {
+         username: u.username,
+         isOnline: false,
+         peerId: null,
+         userId: uId,
+         avatar: u.avatar || '',
+         isAdmin: u.isAdmin || false
+      };
    }
 }
 initAllTimeUsersFromDb();
+
+// Sunucuya bir kez giren herkes burada kalır. Yeniden başlatma ve Render
+// deploy'u listeyi eski test hesaplarına döndürmesin diye yerel dosya + Mongo.
+const SEEN_USERS_FILE = path.join(__dirname, 'seen_users.json');
+let seenUsers = {};
+
+function loadSeenUsersLocally() {
+   try {
+      if (fs.existsSync(SEEN_USERS_FILE)) {
+         const parsed = JSON.parse(fs.readFileSync(SEEN_USERS_FILE, 'utf8'));
+         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            seenUsers = parsed;
+         }
+      } else {
+         fs.writeFileSync(SEEN_USERS_FILE, JSON.stringify({}, null, 2), 'utf8');
+      }
+   } catch (err) {
+      console.error("Giriş yapan kullanıcılar yüklenirken hata oluştu:", err);
+   }
+}
+
+function saveSeenUsersLocally() {
+   try {
+      fs.writeFileSync(SEEN_USERS_FILE, JSON.stringify(seenUsers, null, 2), 'utf8');
+   } catch (err) {
+      console.error("Giriş yapan kullanıcılar kaydedilirken hata oluştu:", err);
+   }
+}
+
+function persistSeenUserMongo(record) {
+   if (!isMongoConnected || !SeenUserModel || !record || !record.userId) return;
+   SeenUserModel.findOneAndUpdate(
+      { userId: record.userId },
+      { $set: record },
+      { upsert: true }
+   ).catch(err => {
+      console.error('[SeenUsers] Kayıt hatası:', err.message);
+   });
+}
+
+function rosterAvatar(userId, avatar) {
+   if (usersDb[userId] && usersDb[userId].avatar) return usersDb[userId].avatar;
+   return avatar || '';
+}
+
+function applySeenUserOffline(record) {
+   if (!record || !record.userId || !record.username) return;
+   const avatar = rosterAvatar(record.userId, record.avatar);
+   const current = allTimeUsers[record.userId];
+   if (current && current.isOnline) {
+      current.username = record.username || current.username;
+      current.avatar = avatar || current.avatar || '';
+      current.isAdmin = !!(record.isAdmin || current.isAdmin);
+      return;
+   }
+   allTimeUsers[record.userId] = {
+      username: record.username,
+      isOnline: false,
+      peerId: null,
+      userId: record.userId,
+      avatar: avatar,
+      isAdmin: !!record.isAdmin
+   };
+}
+
+function ensureServerMember(serverId, userId) {
+   const server = serversDb[serverId];
+   if (!server || !userId) return false;
+   if (!server.members) server.members = [];
+   if (server.members.includes(userId)) return false;
+   server.members.push(userId);
+   return true;
+}
+
+function rememberEntrant(userId, info, serverIds) {
+   if (!userId || !info) return [];
+   const username = (info.username || '').trim();
+   if (!username) return [];
+
+   if (isFixtureAccount(usersDb[userId])) {
+      if (info.isOnline) {
+         allTimeUsers[userId] = {
+            username,
+            isOnline: true,
+            peerId: info.peerId || null,
+            userId,
+            avatar: rosterAvatar(userId, info.avatar || ''),
+            isAdmin: !!info.isAdmin
+         };
+      }
+      return [];
+   }
+
+   const prev = seenUsers[userId] || {};
+   const servers = new Set(prev.servers || []);
+   const targets = (serverIds && serverIds.length) ? serverIds : ['server_default'];
+   const addedServers = [];
+
+   for (const serverId of targets) {
+      if (!serversDb[serverId]) continue;
+      servers.add(serverId);
+      if (ensureServerMember(serverId, userId)) addedServers.push(serverId);
+   }
+
+   const incomingAvatar = info.avatar != null ? info.avatar : (prev.avatar || '');
+   const record = {
+      userId,
+      username,
+      avatar: usersDb[userId] ? '' : incomingAvatar,
+      isAdmin: !!(info.isAdmin || prev.isAdmin),
+      lastSeen: Date.now(),
+      servers: [...servers]
+   };
+   seenUsers[userId] = record;
+   saveSeenUsersLocally();
+   persistSeenUserMongo(record);
+
+   const current = allTimeUsers[userId];
+   allTimeUsers[userId] = {
+      username: record.username,
+      isOnline: info.isOnline !== undefined ? !!info.isOnline : !!(current && current.isOnline),
+      peerId: info.peerId !== undefined ? info.peerId : (current ? current.peerId : null),
+      userId,
+      avatar: rosterAvatar(userId, incomingAvatar),
+      isAdmin: record.isAdmin
+   };
+
+   if (addedServers.length) saveServers();
+
+   const key = username.trim().toLowerCase();
+   for (const otherId of Object.keys(seenUsers)) {
+      if (otherId === userId || !otherId.startsWith('seen_')) continue;
+      if ((seenUsers[otherId].username || '').trim().toLowerCase() !== key) continue;
+      delete seenUsers[otherId];
+      delete allTimeUsers[otherId];
+      let removedMember = false;
+      for (const serverId in serversDb) {
+         const server = serversDb[serverId];
+         if (!server.members || !server.members.includes(otherId)) continue;
+         server.members = server.members.filter(id => id !== otherId);
+         removedMember = true;
+         io.emit('server-update', serverId, server);
+      }
+      if (removedMember) saveServers();
+      if (isMongoConnected && SeenUserModel) {
+         SeenUserModel.deleteOne({ userId: otherId }).catch(() => {});
+      }
+   }
+   saveSeenUsersLocally();
+   return addedServers;
+}
+
+function backfillEntrantsFromMessages() {
+   const byName = new Map();
+   for (const roomId in messageHistory) {
+      for (const msg of messageHistory[roomId] || []) {
+         if (!msg || msg.isSystem) continue;
+         const username = (msg.sender || '').trim();
+         if (!username || username === 'Sistem') continue;
+         const key = username.toLowerCase();
+         const prev = byName.get(key) || { username, senderId: null };
+         if (msg.senderId && !prev.senderId) prev.senderId = msg.senderId;
+         byName.set(key, prev);
+      }
+   }
+
+   for (const entry of byName.values()) {
+      const key = entry.username.toLowerCase();
+      const already = Object.keys(seenUsers).some(id => (seenUsers[id].username || '').trim().toLowerCase() === key)
+         || Object.keys(allTimeUsers).some(id => (allTimeUsers[id].username || '').trim().toLowerCase() === key && !isFixtureAccount(usersDb[id]));
+      if (already) continue;
+
+      let userId = entry.senderId || null;
+      if (userId && isFixtureAccount(usersDb[userId])) userId = null;
+      if (!userId) {
+         const accountId = Object.keys(usersDb).find(id =>
+            !isFixtureAccount(usersDb[id]) && (usersDb[id].username || '').trim().toLowerCase() === key
+         );
+         userId = accountId || ('seen_' + Buffer.from(key).toString('base64url'));
+      }
+      if (seenUsers[userId] || isFixtureAccount(usersDb[userId])) continue;
+
+      const account = usersDb[userId];
+      rememberEntrant(userId, {
+         username: account ? account.username : entry.username,
+         avatar: account ? (account.avatar || '') : '',
+         isAdmin: account ? !!account.isAdmin : false,
+         isOnline: !!(allTimeUsers[userId] && allTimeUsers[userId].isOnline),
+         peerId: allTimeUsers[userId] ? allTimeUsers[userId].peerId : null
+      }, ['server_default']);
+   }
+}
+
+function forgetEntrant(userId) {
+   if (!userId) return;
+   if (seenUsers[userId]) {
+      delete seenUsers[userId];
+      saveSeenUsersLocally();
+   }
+   if (isMongoConnected && SeenUserModel) {
+      SeenUserModel.deleteOne({ userId }).catch(err => {
+         console.error('[SeenUsers] Silme hatası:', err.message);
+      });
+   }
+   for (const serverId in serversDb) {
+      const server = serversDb[serverId];
+      if (!server.members || !server.members.includes(userId)) continue;
+      server.members = server.members.filter(id => id !== userId);
+      saveServers();
+      io.emit('server-update', serverId, server);
+   }
+}
+
+function seedSeenUsersFromMembers() {
+   let changed = false;
+   let membersChanged = false;
+   for (const serverId in serversDb) {
+      const server = serversDb[serverId];
+      const before = (server.members || []).length;
+      server.members = (server.members || []).filter(memberId => !isFixtureAccount(usersDb[memberId]));
+      if (server.members.length !== before) membersChanged = true;
+
+      for (const memberId of server.members) {
+         const account = usersDb[memberId];
+         if (!account || !account.username || isFixtureAccount(account)) continue;
+         if (!seenUsers[memberId]) {
+            seenUsers[memberId] = {
+               userId: memberId,
+               username: account.username,
+               avatar: '',
+               isAdmin: !!account.isAdmin,
+               lastSeen: 0,
+               servers: [serverId]
+            };
+            changed = true;
+         } else if (!(seenUsers[memberId].servers || []).includes(serverId)) {
+            seenUsers[memberId].servers = [...(seenUsers[memberId].servers || []), serverId];
+            changed = true;
+         }
+         applySeenUserOffline(seenUsers[memberId]);
+      }
+   }
+   if (changed) saveSeenUsersLocally();
+   if (membersChanged) saveServers();
+   backfillEntrantsFromMessages();
+}
+
+loadSeenUsersLocally();
+for (const userId of Object.keys(seenUsers)) {
+   if (isFixtureAccount(usersDb[userId])) {
+      delete seenUsers[userId];
+      continue;
+   }
+   applySeenUserOffline(seenUsers[userId]);
+   for (const serverId of seenUsers[userId].servers || []) {
+      if (ensureServerMember(serverId, userId)) saveServers();
+   }
+}
+seedSeenUsersFromMembers();
+
+async function syncSeenUsersWithMongo() {
+   if (!isMongoConnected || !SeenUserModel) return;
+   try {
+      const docs = await SeenUserModel.find({}).lean();
+      let membersChanged = false;
+
+      for (const doc of docs) {
+         if (!doc || !doc.userId || !doc.username) continue;
+         if (isFixtureAccount(usersDb[doc.userId])) continue;
+         const local = seenUsers[doc.userId];
+         const remoteNewer = !local || (doc.lastSeen || 0) >= ((local && local.lastSeen) || 0);
+         const mergedServers = new Set([
+            ...((local && local.servers) || []),
+            ...(doc.servers || [])
+         ]);
+         if (mergedServers.size === 0) mergedServers.add('server_default');
+
+         const record = {
+            userId: doc.userId,
+            username: remoteNewer ? doc.username : (local.username || doc.username),
+            avatar: remoteNewer ? (doc.avatar || '') : ((local && local.avatar) || doc.avatar || ''),
+            isAdmin: !!(doc.isAdmin || (local && local.isAdmin)),
+            lastSeen: Math.max(doc.lastSeen || 0, (local && local.lastSeen) || 0),
+            servers: [...mergedServers]
+         };
+         seenUsers[record.userId] = record;
+         applySeenUserOffline(record);
+         for (const serverId of record.servers) {
+            if (ensureServerMember(serverId, record.userId)) membersChanged = true;
+         }
+      }
+
+      if (MessageModel) {
+         const senders = await MessageModel.aggregate([
+            { $match: { senderId: { $nin: [null, ''] }, isSystem: { $ne: true } } },
+            { $sort: { timestamp: 1 } },
+            { $group: { _id: '$senderId', username: { $last: '$sender' } } }
+         ]);
+         for (const sender of senders) {
+            if (!sender || !sender._id || !sender.username || sender.username === 'Sistem') continue;
+            if (seenUsers[sender._id]) continue;
+            const account = usersDb[sender._id];
+            const added = rememberEntrant(sender._id, {
+               username: account ? account.username : sender.username,
+               avatar: account ? (account.avatar || '') : '',
+               isAdmin: account ? !!account.isAdmin : false,
+               isOnline: !!(allTimeUsers[sender._id] && allTimeUsers[sender._id].isOnline),
+               peerId: allTimeUsers[sender._id] ? allTimeUsers[sender._id].peerId : null
+            }, ['server_default']);
+            if (added.length) membersChanged = true;
+         }
+      }
+
+      for (const userId in seenUsers) {
+         await SeenUserModel.findOneAndUpdate(
+            { userId },
+            { $set: seenUsers[userId] },
+            { upsert: true }
+         );
+      }
+
+      backfillEntrantsFromMessages();
+      saveSeenUsersLocally();
+      if (membersChanged) saveServers();
+      io.emit('global-users', allTimeUsers);
+      for (const serverId in serversDb) {
+         io.emit('server-update', serverId, serversDb[serverId]);
+      }
+      console.log(`[SeenUsers] ${Object.keys(seenUsers).length} kullanıcı sağ listede kalıcı tutuluyor.`);
+   } catch (err) {
+      console.error('[SeenUsers] Senkron hatası:', err.message);
+   }
+}
+
 const ADMIN_KEY = process.env.ADMIN_KEY || "berzan123";
 
 io.on('connection', (socket) => {
@@ -1370,14 +1755,17 @@ io.on('connection', (socket) => {
       
       userSockets[uId] = socket.id;
 
-      allTimeUsers[uId] = {
+      const addedServers = rememberEntrant(uId, {
          username: finalUsername,
-         isOnline: true,
-         peerId: peerId,
-         userId: uId,
          avatar: finalAvatar,
-         isAdmin: isAdmin
-      };
+         isAdmin: isAdmin,
+         isOnline: true,
+         peerId: peerId
+      }, ['server_default']);
+
+      for (const serverId of addedServers) {
+         io.emit('server-update', serverId, serversDb[serverId]);
+      }
 
       io.emit('global-users', allTimeUsers);
       socket.emit('voice-rooms-state', voiceRooms);
@@ -1758,10 +2146,11 @@ io.on('connection', (socket) => {
          saveUsers();
       }
 
-      // allTimeUsers'dan sil
+      // allTimeUsers'dan ve kalıcı giriş listesinden sil
       if (allTimeUsers[targetUserId]) {
          delete allTimeUsers[targetUserId];
       }
+      forgetEntrant(targetUserId);
 
       io.emit('global-users', allTimeUsers);
    });
@@ -1920,8 +2309,21 @@ io.on('connection', (socket) => {
          delete userSockets[socket.userId];
       }
 
-      if (socket.userId && allTimeUsers[socket.userId]) {
+      const stillConnected = socket.userId && userSockets[socket.userId];
+      if (socket.userId && allTimeUsers[socket.userId] && !stillConnected && isFixtureAccount(usersDb[socket.userId])) {
+         delete allTimeUsers[socket.userId];
+         io.emit('global-users', allTimeUsers);
+      } else if (socket.userId && allTimeUsers[socket.userId] && !stillConnected) {
          allTimeUsers[socket.userId].isOnline = false;
+         allTimeUsers[socket.userId].peerId = null;
+         if (seenUsers[socket.userId]) {
+            seenUsers[socket.userId].lastSeen = Date.now();
+            seenUsers[socket.userId].username = allTimeUsers[socket.userId].username;
+            seenUsers[socket.userId].avatar = allTimeUsers[socket.userId].avatar || '';
+            seenUsers[socket.userId].isAdmin = !!allTimeUsers[socket.userId].isAdmin;
+            saveSeenUsersLocally();
+            persistSeenUserMongo(seenUsers[socket.userId]);
+         }
          io.emit('global-users', allTimeUsers);
       }
    });

@@ -1,0 +1,53 @@
+{
+  "user_yt3tzwby5_1781558236327": {
+    "userId": "user_yt3tzwby5_1781558236327",
+    "username": "Berzan baba",
+    "avatar": "",
+    "isAdmin": true,
+    "lastSeen": 0,
+    "servers": [
+      "server_default",
+      "server_9rmrixru9_1781607494546"
+    ]
+  },
+  "seen_acyHbmYgdGVhbSBkZWRh": {
+    "userId": "seen_acyHbmYgdGVhbSBkZWRh",
+    "username": "İNF Team DEDA",
+    "avatar": "",
+    "isAdmin": false,
+    "lastSeen": 1791533775972,
+    "servers": [
+      "server_default"
+    ]
+  },
+  "seen_ZXJheSBhbHTEsW4": {
+    "userId": "seen_ZXJheSBhbHTEsW4",
+    "username": "Eray Altın",
+    "avatar": "",
+    "isAdmin": false,
+    "lastSeen": 1791533775974,
+    "servers": [
+      "server_default"
+    ]
+  },
+  "seen_ZG9nYW4gb2tjdQ": {
+    "userId": "seen_ZG9nYW4gb2tjdQ",
+    "username": "Dogan Okcu",
+    "avatar": "",
+    "isAdmin": false,
+    "lastSeen": 1791533775974,
+    "servers": [
+      "server_default"
+    ]
+  },
+  "seen_b21lciBva2N1": {
+    "userId": "seen_b21lciBva2N1",
+    "username": "Omer Okcu",
+    "avatar": "",
+    "isAdmin": false,
+    "lastSeen": 1791533775975,
+    "servers": [
+      "server_default"
+    ]
+  }
+}
