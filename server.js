@@ -1624,26 +1624,7 @@ function rememberEntrant(userId, info, serverIds) {
 
    if (addedServers.length) saveServers();
 
-   const key = username.trim().toLowerCase();
-   for (const otherId of Object.keys(seenUsers)) {
-      if (otherId === userId || !otherId.startsWith('seen_')) continue;
-      if ((seenUsers[otherId].username || '').trim().toLowerCase() !== key) continue;
-      delete seenUsers[otherId];
-      delete allTimeUsers[otherId];
-      let removedMember = false;
-      for (const serverId in serversDb) {
-         const server = serversDb[serverId];
-         if (!server.members || !server.members.includes(otherId)) continue;
-         server.members = server.members.filter(id => id !== otherId);
-         removedMember = true;
-         io.emit('server-update', serverId, server);
-      }
-      if (removedMember) saveServers();
-      if (isMongoConnected && SeenUserModel) {
-         SeenUserModel.deleteOne({ userId: otherId }).catch(() => {});
-      }
-   }
-   saveSeenUsersLocally();
+   reconcileUserAliases(userId, username);
    return addedServers;
 }
 
@@ -1836,6 +1817,7 @@ io.on('connection', (socket) => {
 
    socket.on('register', (peerId, username, userId, avatar, adminToken) => {
       const uId = userId || peerId;
+      const previousPeerId = socket.peerId || null;
       socket.peerId = peerId;
       
       // Get stored user info from DB if possible
@@ -1867,6 +1849,29 @@ io.on('connection', (socket) => {
          isOnline: true,
          peerId: peerId
       }, ['server_default']);
+
+      // PeerJS id değişince ses odasında eski hayalet kayıtları temizle
+      purgeStaleVoicePeersForUser(uId, finalUsername, peerId);
+      if (previousPeerId && previousPeerId !== peerId && socket.voiceRoom && voiceRooms[socket.voiceRoom]) {
+         if (voiceRooms[socket.voiceRoom][previousPeerId]) {
+            delete voiceRooms[socket.voiceRoom][previousPeerId];
+            socket.to('voice-' + socket.voiceRoom).emit('voice-user-left', {
+               peerId: previousPeerId,
+               username: finalUsername,
+               roomId: socket.voiceRoom
+            });
+         }
+         // Yeni peerId ile odaya yeniden yaz
+         voiceRooms[socket.voiceRoom][peerId] = {
+            username: finalUsername,
+            userId: uId,
+            mic: socket.voiceState ? socket.voiceState.mic : true,
+            deaf: socket.voiceState ? socket.voiceState.deaf : false,
+            avatar: finalAvatar || '',
+            isSharingScreen: !!(socket.voiceRoom && voiceRooms[socket.voiceRoom][previousPeerId] && voiceRooms[socket.voiceRoom][previousPeerId].isSharingScreen)
+         };
+         io.emit('voice-rooms-state', voiceRooms);
+      }
 
       for (const serverId of addedServers) {
          io.emit('server-update', serverId, serversDb[serverId]);
