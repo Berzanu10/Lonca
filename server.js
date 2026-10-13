@@ -1188,7 +1188,10 @@ async function syncMessagesWithMongo() {
                   timestamp: doc.timestamp,
                   pinned: !!doc.pinned,
                   isSystem: !!doc.isSystem,
-                  pinnedMsgId: doc.pinnedMsgId || null
+                  pinnedMsgId: doc.pinnedMsgId || null,
+                  replyTo: doc.replyTo || null,
+                  reactions: doc.reactions || {},
+                  mentions: doc.mentions || []
                });
                importedCount++;
             }
@@ -1397,21 +1400,23 @@ function reconcileUserAliases(canonicalId, username) {
    const key = username.trim().toLowerCase();
    if (!key) return;
 
-   for (const otherId of Object.keys(seenUsers)) {
+   for (const otherId of [...Object.keys(seenUsers), ...Object.keys(allTimeUsers)]) {
       if (otherId === canonicalId) continue;
-      if ((seenUsers[otherId].username || '').trim().toLowerCase() !== key) continue;
-      if (isAliasUserId(otherId) || isAliasUserId(canonicalId) === false) {
-         removeUserFromRosters(otherId);
-      }
-   }
+      const seenName = seenUsers[otherId] ? (seenUsers[otherId].username || '') : '';
+      const liveName = allTimeUsers[otherId] ? (allTimeUsers[otherId].username || '') : '';
+      const name = (seenName || liveName).trim().toLowerCase();
+      if (name !== key) continue;
 
-   for (const otherId of Object.keys(allTimeUsers)) {
-      if (otherId === canonicalId) continue;
-      const other = allTimeUsers[otherId];
-      if (!other || (other.username || '').trim().toLowerCase() !== key) continue;
-      // Online gerçek oturumu silme; sadece hayalet / alias kayıtları temizle
-      if (other.isOnline && !isAliasUserId(otherId)) continue;
-      if (isAliasUserId(otherId) || !other.isOnline) {
+      const otherLive = allTimeUsers[otherId];
+      // Online gerçek hesabı silme
+      if (otherLive && otherLive.isOnline && !isAliasUserId(otherId)) continue;
+
+      // Alias hayaletleri ve aynı isimli offline kopyaları temizle
+      if (isAliasUserId(otherId) || !(otherLive && otherLive.isOnline)) {
+         // İki gerçek hesap aynı isimdeyse ve diğeri çevrimdışıysa, kanonik giriş yapan kalsın
+         if (!isAliasUserId(otherId) && usersDb[otherId] && usersDb[canonicalId] && otherId !== canonicalId) {
+            if (otherLive && otherLive.isOnline) continue;
+         }
          removeUserFromRosters(otherId);
       }
    }
@@ -1991,22 +1996,34 @@ io.on('connection', (socket) => {
          const roomId = socket.textRoom;
          let text = '';
          let image = null;
+         let replyTo = null;
 
          if (typeof data === 'string') {
             text = data.trim();
          } else if (typeof data === 'object' && data !== null) {
             text = (data.text || '').trim();
             image = data.image || null;
+            if (data.replyTo && data.replyTo.id) {
+               replyTo = {
+                  id: data.replyTo.id,
+                  sender: data.replyTo.sender || '',
+                  text: (data.replyTo.text || '').slice(0, 180)
+               };
+            }
          }
 
          if (!text && !image) return;
 
+         const mentions = extractMentions(text);
          const msgObj = {
             id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
             sender: socket.username,
             senderId: socket.userId || null,
             text: text,
             image: image,
+            replyTo,
+            reactions: {},
+            mentions,
             timestamp: Date.now()
          };
 
@@ -2019,7 +2036,15 @@ io.on('connection', (socket) => {
 
          saveMessages(roomId, msgObj);
 
-         io.to('text-' + roomId).emit('create-message', text, socket.username, msgObj.id, false, image);
+         const payload = buildMessagePayload(msgObj);
+         io.to('text-' + roomId).emit('create-message', payload);
+         io.emit('channel-activity', {
+            roomId,
+            messageId: msgObj.id,
+            mentions,
+            sender: socket.username,
+            text: text.slice(0, 120)
+         });
 
          // Çift yönlü oda eşitlemesi (genel <-> serverChannel_server_default_genel vb.)
          const defaultServerId = 'server_default';
@@ -2039,7 +2064,14 @@ io.on('connection', (socket) => {
                   messageHistory[targetMirror].push(msgObj);
                   if (messageHistory[targetMirror].length > 500) messageHistory[targetMirror].shift();
                   saveMessages(targetMirror, msgObj);
-                  io.to('text-' + targetMirror).emit('create-message', text, socket.username, msgObj.id, false, image);
+                  io.to('text-' + targetMirror).emit('create-message', payload);
+                  io.emit('channel-activity', {
+                     roomId: targetMirror,
+                     messageId: msgObj.id,
+                     mentions,
+                     sender: socket.username,
+                     text: text.slice(0, 120)
+                  });
                }
                break;
             }
@@ -2060,6 +2092,37 @@ io.on('connection', (socket) => {
             }
          }
       }
+   });
+
+   socket.on('react-message', ({ msgId, emoji }) => {
+      if (!msgId || !emoji || !socket.username) return;
+      const allowed = ['👍', '❤️', '😂', '🔥', '😮', '👏'];
+      if (!allowed.includes(emoji)) return;
+
+      let targetRoom = null;
+      let targetMsg = null;
+      for (const room in messageHistory) {
+         const m = (messageHistory[room] || []).find(x => x.id === msgId);
+         if (m) {
+            targetRoom = room;
+            targetMsg = m;
+            break;
+         }
+      }
+      if (!targetMsg) return;
+
+      if (!targetMsg.reactions || typeof targetMsg.reactions !== 'object') targetMsg.reactions = {};
+      if (!Array.isArray(targetMsg.reactions[emoji])) targetMsg.reactions[emoji] = [];
+      const idx = targetMsg.reactions[emoji].indexOf(socket.username);
+      if (idx >= 0) targetMsg.reactions[emoji].splice(idx, 1);
+      else targetMsg.reactions[emoji].push(socket.username);
+      if (targetMsg.reactions[emoji].length === 0) delete targetMsg.reactions[emoji];
+
+      saveMessages(targetRoom, targetMsg);
+      io.to('text-' + targetRoom).emit('message-reactions', {
+         msgId,
+         reactions: targetMsg.reactions
+      });
    });
 
    socket.on('delete-message', (msgId) => {
@@ -2144,17 +2207,18 @@ io.on('connection', (socket) => {
 
          if (socket.peerId) {
             const alreadyHere = !!voiceRooms[roomId][socket.peerId];
+            const prevShare = alreadyHere ? !!voiceRooms[roomId][socket.peerId].isSharingScreen : false;
             voiceRooms[roomId][socket.peerId] = {
                username: socket.username,
                userId: socket.userId || null,
                mic: socket.voiceState ? socket.voiceState.mic : true,
                deaf: socket.voiceState ? socket.voiceState.deaf : false,
                avatar: socket.avatar || '',
-               isSharingScreen: alreadyHere ? !!voiceRooms[roomId][socket.peerId].isSharingScreen : false
+               isSharingScreen: prevShare
             };
 
             socket.join('voice-' + roomId);
-            if (!alreadyHere || prevRoom !== roomId) {
+            if (!alreadyHere && prevRoom !== roomId) {
                socket.to('voice-' + roomId).emit('voice-user-joined', {
                   peerId: socket.peerId,
                   username: socket.username,
@@ -2380,6 +2444,12 @@ io.on('connection', (socket) => {
       if (socket.voiceRoom && voiceRooms[socket.voiceRoom] && voiceRooms[socket.voiceRoom][socket.peerId]) {
          voiceRooms[socket.voiceRoom][socket.peerId].isSharingScreen = true;
          io.emit('voice-rooms-state', voiceRooms);
+         io.to('voice-' + socket.voiceRoom).emit('stream-started', {
+            peerId: socket.peerId,
+            userId: socket.userId || null,
+            username: socket.username,
+            roomId: socket.voiceRoom
+         });
       }
    });
 
@@ -2387,6 +2457,11 @@ io.on('connection', (socket) => {
       if (socket.voiceRoom && voiceRooms[socket.voiceRoom] && voiceRooms[socket.voiceRoom][socket.peerId]) {
          voiceRooms[socket.voiceRoom][socket.peerId].isSharingScreen = false;
          io.emit('voice-rooms-state', voiceRooms);
+         io.to('voice-' + socket.voiceRoom).emit('stream-stopped', {
+            peerId: socket.peerId,
+            username: socket.username,
+            roomId: socket.voiceRoom
+         });
       }
    });
 

@@ -254,12 +254,13 @@
                <div id="voice-connection-info"
                   style="display: none; align-items: center; justify-content: space-between;">
                   <div class="connection-left">
-                     <svg class="signal-icon" width="20" height="20" viewBox="0 0 24 24" fill="#43b581">
+                     <svg class="signal-icon" id="voice-signal-icon" width="20" height="20" viewBox="0 0 24 24" fill="#43b581">
                         <path d="M12 21h2v-6h-2v6zm-4 0h2v-11H8v11zm8 0h2v-14h-2v14zm4-19v21h2V2h-2zM4 21h2v-4H4v4z" />
                      </svg>
                      <div class="voice-text">
-                        <div class="status-title">Sese Bağlandı</div>
+                        <div class="status-title" id="voice-status-title">Sese Bağlandı</div>
                         <div class="status-room" id="active-voice-room-name">Sohbet Odası</div>
+                        <div class="status-quality" id="voice-connection-quality">Bağlantı ölçülüyor…</div>
                      </div>
                   </div>
                   <div style="display: flex; gap: 4px; flex-shrink: 0;">
@@ -371,6 +372,29 @@
                <h2 id="current-room-name"># genel</h2>
             </div>
             <div class="chat-section">
+               <!-- Yayın Sahnesi -->
+               <div id="stream-stage" class="stream-stage" style="display: none;">
+                  <div class="stream-stage-header">
+                     <div class="stream-stage-live">CANLI</div>
+                     <span id="stream-stage-title">Yayın</span>
+                     <div class="stream-stage-actions">
+                        <label class="stream-audio-label" title="Yayın sesi">
+                           🔊
+                           <input type="range" id="stream-audio-volume" min="0" max="1" step="0.05" value="1">
+                        </label>
+                        <button type="button" id="stream-record-btn" class="stream-stage-btn" title="Yayını Kaydet">⏺ Kaydet</button>
+                        <button type="button" id="stream-expand-btn" class="stream-stage-btn" title="Büyüt">⛶</button>
+                        <button type="button" id="stream-minimize-btn" class="stream-stage-btn" title="Küçült">–</button>
+                        <button type="button" id="stream-close-stage-btn" class="stream-stage-btn danger" title="Sahneyi Kapat">×</button>
+                     </div>
+                  </div>
+                  <div id="stream-stage-body" class="stream-stage-body">
+                     <video id="stream-stage-video" autoplay playsinline></video>
+                     <div id="stream-stage-empty" class="stream-stage-empty">Yayın bekleniyor…</div>
+                  </div>
+               </div>
+               <div id="stream-toast" class="stream-toast" style="display: none;"></div>
+
                <!-- Sabitlenenler -->
                <div id="pinned-messages-banner" class="pinned-banner" style="display: none;">
                   <div class="pinned-banner-content">
@@ -406,6 +430,16 @@
                   <span id="image-preview-name" class="image-preview-name"></span>
                </div>
 
+               <!-- Yanıt çubuğu -->
+               <div id="reply-bar" class="reply-bar" style="display: none;">
+                  <div class="reply-bar-content">
+                     <span class="reply-bar-label">Yanıtlanıyor</span>
+                     <strong id="reply-bar-user"></strong>
+                     <span id="reply-bar-text"></span>
+                  </div>
+                  <button type="button" id="reply-bar-cancel" class="reply-bar-cancel" title="İptal">×</button>
+               </div>
+
                <form id="chat-form">
                   <input type="file" id="image-file-input" accept="image/*" style="display: none;">
                   <button type="button" id="attach-image-btn" class="chat-attach-btn" title="Fotoğraf / Görsel Gönder">
@@ -413,9 +447,10 @@
                         <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
                      </svg>
                   </button>
-                  <input type="text" id="chat-input" placeholder="Mesaj yaz veya görsel yapıştır..." autocomplete="off">
+                  <input type="text" id="chat-input" placeholder="Mesaj yaz, @isim etiketle veya görsel yapıştır..." autocomplete="off">
                   <button type="submit" id="chat-send-btn">Gönder</button>
                </form>
+               <div id="mention-suggest" class="mention-suggest" style="display: none;"></div>
             </div>
          </div>
 
@@ -505,6 +540,23 @@
                   <button id="open-password-modal-btn" class="save-btn" type="button"
                      style="width: 100%; background: #2b2d31; color: #dbdee1; border: 1px solid rgba(255,255,255,0.05);">Şifre
                      Değiştir</button>
+               </div>
+
+               <div class="voice-settings-block">
+                  <h4 class="voice-settings-title">Ses Ayarları</h4>
+                  <label class="voice-settings-row">
+                     <span>Bas-Konuş (PTT)</span>
+                     <input type="checkbox" id="setting-ptt-enabled">
+                  </label>
+                  <label class="voice-settings-row">
+                     <span>Bas-Konuş tuşu</span>
+                     <button type="button" id="setting-ptt-key" class="keybind-btn">V</button>
+                  </label>
+                  <label class="voice-settings-row">
+                     <span>Mikrofon aç/kapa tuşu</span>
+                     <button type="button" id="setting-mute-key" class="keybind-btn">M</button>
+                  </label>
+                  <p class="voice-settings-hint">Bas-Konuş açıkken mikrofon yalnızca tuşa basılı tutulunca açılır.</p>
                </div>
 
                <div class="profile-user-card-details">
@@ -615,11 +667,23 @@
             <h3>🎥 Ekran Paylaşım Ayarları</h3>
             <div class="profile-body" style="gap: 15px; padding: 20px;">
                <label
+                  style="color: var(--text-muted); font-size: 0.72rem; font-weight: 700; text-transform: uppercase;">Hazır Kalite</label>
+               <div class="profile-input-wrapper">
+                  <select id="share-preset"
+                     style="width: 100%; background: transparent; border: none; color: #fff; padding: 10px 0; outline: none; font-size: 0.95rem; font-family: inherit;">
+                     <option value="meeting" style="background: #1e2124;" selected>Toplantı — 720p / 30 FPS (yazı net)</option>
+                     <option value="game" style="background: #1e2124;">Oyun — 1080p / 60 FPS</option>
+                     <option value="weak" style="background: #1e2124;">Zayıf internet — 480p / 24 FPS</option>
+                     <option value="custom" style="background: #1e2124;">Özel</option>
+                  </select>
+               </div>
+               <label
                   style="color: var(--text-muted); font-size: 0.72rem; font-weight: 700; text-transform: uppercase;">Çözünürlük</label>
                <div class="profile-input-wrapper">
                   <select id="share-resolution"
                      style="width: 100%; background: transparent; border: none; color: #fff; padding: 10px 0; outline: none; font-size: 0.95rem; font-family: inherit;">
                      <option value="360" style="background: #1e2124;">360p (Düşük Kalite)</option>
+                     <option value="480" style="background: #1e2124;">480p</option>
                      <option value="720" style="background: #1e2124;" selected>720p (Standart HD)</option>
                      <option value="1080" style="background: #1e2124;">1080p (Full HD)</option>
                   </select>
@@ -630,6 +694,7 @@
                <div class="profile-input-wrapper">
                   <select id="share-fps"
                      style="width: 100%; background: transparent; border: none; color: #fff; padding: 10px 0; outline: none; font-size: 0.95rem; font-family: inherit;">
+                     <option value="24" style="background: #1e2124;">24 FPS</option>
                      <option value="30" style="background: #1e2124;" selected>30 FPS</option>
                      <option value="60" style="background: #1e2124;">60 FPS</option>
                   </select>
