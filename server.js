@@ -1015,7 +1015,10 @@ try {
       timestamp: { type: Number, required: true },
       pinned: { type: Boolean, default: false },
       isSystem: { type: Boolean, default: false },
-      pinnedMsgId: { type: String, default: null }
+      pinnedMsgId: { type: String, default: null },
+      replyTo: { type: mongoose.Schema.Types.Mixed, default: null },
+      reactions: { type: mongoose.Schema.Types.Mixed, default: {} },
+      mentions: { type: [String], default: [] }
    }, { timestamps: true });
 
    MessageModel = mongoose.models.Message || mongoose.model('Message', messageSchema);
@@ -1354,13 +1357,115 @@ function saveMessages(roomId, msgObj) {
             timestamp: msgObj.timestamp,
             pinned: !!msgObj.pinned,
             isSystem: !!msgObj.isSystem,
-            pinnedMsgId: msgObj.pinnedMsgId || null
+            pinnedMsgId: msgObj.pinnedMsgId || null,
+            replyTo: msgObj.replyTo || null,
+            reactions: msgObj.reactions || {},
+            mentions: msgObj.mentions || []
          },
          { upsert: true, new: true }
       ).catch(err => {
          console.error('[MongoDB] Mesaj kaydetme hatası:', err.message);
       });
    }
+}
+
+function isAliasUserId(userId) {
+   return typeof userId === 'string' && (userId.startsWith('seen_') || userId.startsWith('user_'));
+}
+
+function removeUserFromRosters(otherId) {
+   if (!otherId) return;
+   delete seenUsers[otherId];
+   delete allTimeUsers[otherId];
+   let removedMember = false;
+   for (const serverId in serversDb) {
+      const server = serversDb[serverId];
+      if (!server.members || !server.members.includes(otherId)) continue;
+      server.members = server.members.filter(id => id !== otherId);
+      removedMember = true;
+      io.emit('server-update', serverId, server);
+   }
+   if (removedMember) saveServers();
+   if (isMongoConnected && SeenUserModel) {
+      SeenUserModel.deleteOne({ userId: otherId }).catch(() => {});
+   }
+}
+
+// Aynı kişi farklı ID'lerle (user_*, seen_*, eski hesap) listede birikmesin.
+function reconcileUserAliases(canonicalId, username) {
+   if (!canonicalId || !username) return;
+   const key = username.trim().toLowerCase();
+   if (!key) return;
+
+   for (const otherId of Object.keys(seenUsers)) {
+      if (otherId === canonicalId) continue;
+      if ((seenUsers[otherId].username || '').trim().toLowerCase() !== key) continue;
+      if (isAliasUserId(otherId) || isAliasUserId(canonicalId) === false) {
+         removeUserFromRosters(otherId);
+      }
+   }
+
+   for (const otherId of Object.keys(allTimeUsers)) {
+      if (otherId === canonicalId) continue;
+      const other = allTimeUsers[otherId];
+      if (!other || (other.username || '').trim().toLowerCase() !== key) continue;
+      // Online gerçek oturumu silme; sadece hayalet / alias kayıtları temizle
+      if (other.isOnline && !isAliasUserId(otherId)) continue;
+      if (isAliasUserId(otherId) || !other.isOnline) {
+         removeUserFromRosters(otherId);
+      }
+   }
+   saveSeenUsersLocally();
+}
+
+function purgeStaleVoicePeersForUser(userId, username, keepPeerId) {
+   let changed = false;
+   for (const roomId of Object.keys(voiceRooms)) {
+      const room = voiceRooms[roomId];
+      if (!room) continue;
+      for (const peerId of Object.keys(room)) {
+         if (peerId === keepPeerId) continue;
+         const entry = room[peerId];
+         const sameUser = (entry.userId && userId && entry.userId === userId)
+            || ((entry.username || '').trim().toLowerCase() === (username || '').trim().toLowerCase());
+         if (!sameUser) continue;
+         delete room[peerId];
+         changed = true;
+         io.to('voice-' + roomId).emit('voice-user-left', {
+            peerId,
+            username: entry.username || username,
+            roomId
+         });
+      }
+   }
+   if (changed) io.emit('voice-rooms-state', voiceRooms);
+}
+
+function extractMentions(text) {
+   if (!text) return [];
+   const found = new Set();
+   const re = /@([A-Za-z0-9_\.\-]{2,32})/g;
+   let m;
+   while ((m = re.exec(text)) !== null) {
+      found.add(m[1].toLowerCase());
+   }
+   return [...found];
+}
+
+function buildMessagePayload(msgObj) {
+   return {
+      id: msgObj.id,
+      sender: msgObj.sender,
+      senderId: msgObj.senderId || null,
+      text: msgObj.text || '',
+      image: msgObj.image || null,
+      isSystem: !!msgObj.isSystem,
+      pinned: !!msgObj.pinned,
+      replyTo: msgObj.replyTo || null,
+      reactions: msgObj.reactions || {},
+      mentions: msgObj.mentions || [],
+      timestamp: msgObj.timestamp || Date.now()
+   };
 }
 
 const allTimeUsers = {};
