@@ -1851,9 +1851,14 @@ io.on('connection', (socket) => {
       }, ['server_default']);
 
       // PeerJS id değişince ses odasında eski hayalet kayıtları temizle
+      let wasSharing = false;
+      if (previousPeerId && previousPeerId !== peerId && socket.voiceRoom && voiceRooms[socket.voiceRoom] && voiceRooms[socket.voiceRoom][previousPeerId]) {
+         wasSharing = !!voiceRooms[socket.voiceRoom][previousPeerId].isSharingScreen;
+      }
       purgeStaleVoicePeersForUser(uId, finalUsername, peerId);
-      if (previousPeerId && previousPeerId !== peerId && socket.voiceRoom && voiceRooms[socket.voiceRoom]) {
-         if (voiceRooms[socket.voiceRoom][previousPeerId]) {
+      if (socket.voiceRoom) {
+         if (!voiceRooms[socket.voiceRoom]) voiceRooms[socket.voiceRoom] = {};
+         if (previousPeerId && previousPeerId !== peerId && voiceRooms[socket.voiceRoom][previousPeerId]) {
             delete voiceRooms[socket.voiceRoom][previousPeerId];
             socket.to('voice-' + socket.voiceRoom).emit('voice-user-left', {
                peerId: previousPeerId,
@@ -1861,16 +1866,17 @@ io.on('connection', (socket) => {
                roomId: socket.voiceRoom
             });
          }
-         // Yeni peerId ile odaya yeniden yaz
-         voiceRooms[socket.voiceRoom][peerId] = {
-            username: finalUsername,
-            userId: uId,
-            mic: socket.voiceState ? socket.voiceState.mic : true,
-            deaf: socket.voiceState ? socket.voiceState.deaf : false,
-            avatar: finalAvatar || '',
-            isSharingScreen: !!(socket.voiceRoom && voiceRooms[socket.voiceRoom][previousPeerId] && voiceRooms[socket.voiceRoom][previousPeerId].isSharingScreen)
-         };
-         io.emit('voice-rooms-state', voiceRooms);
+         if (peerId) {
+            voiceRooms[socket.voiceRoom][peerId] = {
+               username: finalUsername,
+               userId: uId,
+               mic: socket.voiceState ? socket.voiceState.mic : true,
+               deaf: socket.voiceState ? socket.voiceState.deaf : false,
+               avatar: finalAvatar || '',
+               isSharingScreen: wasSharing
+            };
+            io.emit('voice-rooms-state', voiceRooms);
+         }
       }
 
       for (const serverId of addedServers) {
@@ -2124,6 +2130,11 @@ io.on('connection', (socket) => {
          });
       }
 
+      // Aynı odaya yeni peerId ile yeniden giriliyorsa eski hayaletleri temizle
+      if (socket.userId || socket.username) {
+         purgeStaleVoicePeersForUser(socket.userId, socket.username, socket.peerId);
+      }
+
       socket.voiceRoom = roomId;
       if (roomId) {
          if (!voiceRooms[roomId]) voiceRooms[roomId] = {};
@@ -2132,20 +2143,24 @@ io.on('connection', (socket) => {
          socket.emit('voice-join-success', voiceRooms[roomId]);
 
          if (socket.peerId) {
+            const alreadyHere = !!voiceRooms[roomId][socket.peerId];
             voiceRooms[roomId][socket.peerId] = {
                username: socket.username,
+               userId: socket.userId || null,
                mic: socket.voiceState ? socket.voiceState.mic : true,
                deaf: socket.voiceState ? socket.voiceState.deaf : false,
-               avatar: socket.avatar || ''
+               avatar: socket.avatar || '',
+               isSharingScreen: alreadyHere ? !!voiceRooms[roomId][socket.peerId].isSharingScreen : false
             };
 
             socket.join('voice-' + roomId);
-            // Odadaki diğer kullanıcılara birinin girdiğini bildir
-            socket.to('voice-' + roomId).emit('voice-user-joined', {
-               peerId: socket.peerId,
-               username: socket.username,
-               roomId: roomId
-            });
+            if (!alreadyHere || prevRoom !== roomId) {
+               socket.to('voice-' + roomId).emit('voice-user-joined', {
+                  peerId: socket.peerId,
+                  username: socket.username,
+                  roomId: roomId
+               });
+            }
          }
       }
       io.emit('voice-rooms-state', voiceRooms);
