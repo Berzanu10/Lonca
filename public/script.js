@@ -1354,7 +1354,9 @@ function applyHardwareStates() {
 
     for (let id in voiceCalls) {
         const aud = document.getElementById('audio-' + id);
-        if (aud) aud.muted = isDeafened;
+        if (!aud) continue;
+        // Giriş zili bitene kadar tutulan ses sağırlıkla açılmasın
+        aud.muted = aud.dataset.joinHold === '1' ? true : isDeafened;
     }
 
     socket.emit('voice-state-update', { mic: !isMicMuted, deaf: !isDeafened });
@@ -1993,6 +1995,15 @@ voiceChannels.forEach(channel => {
 let latestVoiceRoomsState = {};
 const lastMeshRetryTimes = {};
 let knownVoicePeers = new Set();
+// Odaya biz girerken zaten içeride olanlar. Bunların sesi giriş zilini beklemez.
+let audibleVoicePeers = new Set();
+// Yeni katılanlar: zil bitene kadar hoparlöre verilmez.
+const joiningVoicePeers = new Set();
+const gatedVoiceTimers = new Map();
+let joinChimeEndsAt = 0;
+// voice-join.wav'ın ilk ~1.21 sn'si sessiz; asıl zil 1.21–1.80 sn arasında.
+const JOIN_SOUND_CUE = 1.20;
+const JOIN_CHIME_MS = 780;
 
 async function connectVoiceRoom(room) {
     if (!room) return;
@@ -2024,6 +2035,10 @@ async function connectVoiceRoom(room) {
     } else {
         knownVoicePeers = new Set();
     }
+    audibleVoicePeers = new Set(knownVoicePeers);
+    joiningVoicePeers.clear();
+    gatedVoiceTimers.forEach(timer => clearTimeout(timer));
+    gatedVoiceTimers.clear();
 
     document.querySelectorAll('.voice-channel').forEach(c => c.classList.remove('active'));
     const targetEl = document.querySelector(`.voice-channel[data-room="${room}"]`);
@@ -2058,6 +2073,8 @@ socket.on('voice-join-success', (usersInRoom) => {
     console.log('[Voice Mesh] Odaya giriş başarılı, odadaki kullanıcılar:', usersInRoom);
     for (let pId in usersInRoom) {
         if (pId && pId !== myPeerId) {
+            // Biz girerken içeride olanlar yeni katılan sayılmaz; sesleri hemen açılır.
+            releaseVoiceAfterJoin(pId, true);
             callVoicePeer(pId);
         }
     }
@@ -2066,9 +2083,11 @@ socket.on('voice-join-success', (usersInRoom) => {
 socket.on('voice-user-joined', (data) => {
     // Bulunduğumuz ses odasına biri girdiğinde Discord katılma sesini ANINDA çal
     if (currentVoiceRoom && currentVoiceRoom === data.roomId && data.peerId !== myPeerId) {
-        playVoiceJoinSound();
         if (data.peerId) {
             knownVoicePeers.add(data.peerId);
+            holdVoiceForJoinChime(data.peerId);
+        } else {
+            playVoiceJoinSound();
         }
 
         // Yeni katılan kişinin bize çağrı başlatması beklenir; eğer 3.5 saniye içinde
@@ -2090,6 +2109,7 @@ socket.on('voice-user-left', (data) => {
         playVoiceLeaveSound();
         if (data.peerId) {
             knownVoicePeers.delete(data.peerId);
+            clearJoinHold(data.peerId);
         }
         if (voiceCalls[data.peerId]) {
             try { voiceCalls[data.peerId].close(); } catch(e) {}
@@ -2114,7 +2134,6 @@ function handleVoiceRoomCall(call, targetPeerId, isIncoming) {
         optimizeVoiceCall(call);
         playRemoteAudio(remoteAudio, targetPeerId);
         monitorSpeech(remoteAudio, targetPeerId);
-        // Giriş sesi odaya ilk girildiği an çalınır; WebRTC akışı geldiğinde ses doğrudan hoparlöre verilir.
     };
 
     call.on('stream', remoteAudio => {
@@ -2297,7 +2316,7 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
         peersInCurrentRoom.forEach(pId => {
             if (!knownVoicePeers.has(pId)) {
                 knownVoicePeers.add(pId);
-                playVoiceJoinSound();
+                holdVoiceForJoinChime(pId);
             }
         });
         // Odadan çıkanları takip setinden temizle
@@ -2393,14 +2412,16 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
                     const range = document.createElement('input');
                     range.type = 'range'; range.min = 0; range.max = 1; range.step = 0.05;
                     const existingAudio = document.getElementById('audio-' + id);
-                    const curVol = (userAudioVolumes[id] !== undefined) ? userAudioVolumes[id] : (existingAudio ? existingAudio.volume : 1);
+                    const curVol = (userAudioVolumes[id] !== undefined)
+                        ? userAudioVolumes[id]
+                        : (existingAudio && existingAudio.dataset.joinHold !== '1' ? existingAudio.volume : 1);
                     range.value = curVol;
 
                     range.oninput = (e) => {
                         const val = parseFloat(e.target.value);
                         userAudioVolumes[id] = val;
                         const au = document.getElementById('audio-' + id);
-                        if (au) au.volume = val;
+                        if (au && au.dataset.joinHold !== '1') au.volume = val;
                     };
                     volDiv.appendChild(lbl); volDiv.appendChild(range); li.appendChild(volDiv);
 
@@ -2442,6 +2463,10 @@ function disconnectVoiceRoom(playSound = true) {
     voiceConnectionInfo.style.display = 'none';
     currentVoiceRoom = null;
     knownVoicePeers = new Set();
+    audibleVoicePeers = new Set();
+    joiningVoicePeers.clear();
+    gatedVoiceTimers.forEach(timer => clearTimeout(timer));
+    gatedVoiceTimers.clear();
 
     try {
         const audios = audioContainer.querySelectorAll('audio');
@@ -2470,23 +2495,126 @@ const leaveSoundAudio = new Audio('/sounds/voice-leave.wav');
 leaveSoundAudio.preload = 'auto';
 leaveSoundAudio.volume = 0.50;
 
-function playVoiceJoinSound() {
-    if (isDeafened) return;
-    const now = Date.now();
-    if (now - lastJoinSoundTime < 450) return; // 450ms debounce
-    lastJoinSoundTime = now;
+function joinSoundCueSeconds() {
+    const duration = joinSoundAudio.duration;
+    if (duration && isFinite(duration) && duration > 0.2) {
+        return Math.min(JOIN_SOUND_CUE, duration - 0.05);
+    }
+    return JOIN_SOUND_CUE;
+}
 
-    try {
-        joinSoundAudio.currentTime = 0;
+function playJoinSoundFromCue() {
+    const start = () => {
         const playPromise = joinSoundAudio.play();
         if (playPromise !== undefined) {
             playPromise.catch(() => {
+                joinChimeEndsAt = Math.max(joinChimeEndsAt, Date.now() + 900);
                 synthesizeDiscordChime(true);
             });
         }
+    };
+
+    if (joinSoundAudio.readyState < 1) {
+        joinSoundAudio.addEventListener('loadedmetadata', () => playJoinSoundFromCue(), { once: true });
+        return;
+    }
+
+    const cue = joinSoundCueSeconds();
+    if (Math.abs(joinSoundAudio.currentTime - cue) < 0.03) {
+        start();
+        return;
+    }
+
+    const onSeeked = () => {
+        joinSoundAudio.removeEventListener('seeked', onSeeked);
+        start();
+    };
+    joinSoundAudio.addEventListener('seeked', onSeeked);
+    try {
+        joinSoundAudio.currentTime = cue;
     } catch (e) {
+        joinSoundAudio.removeEventListener('seeked', onSeeked);
+        start();
+    }
+}
+
+function playVoiceJoinSound() {
+    if (isDeafened) return false;
+    const now = Date.now();
+    // Zil hâlâ çalıyorsa baştan başlatma; yeni katılan aynı zilin bitmesini bekler.
+    if (now < joinChimeEndsAt) return true;
+    if (now - lastJoinSoundTime < 450) return true;
+    lastJoinSoundTime = now;
+    joinChimeEndsAt = now + JOIN_CHIME_MS;
+
+    try {
+        playJoinSoundFromCue();
+    } catch (e) {
+        joinChimeEndsAt = Date.now() + 900;
         synthesizeDiscordChime(true);
     }
+    return true;
+}
+
+function savedPeerVolume(peerId) {
+    return (userAudioVolumes[peerId] !== undefined) ? userAudioVolumes[peerId] : 1.0;
+}
+
+function clearJoinHold(peerId) {
+    joiningVoicePeers.delete(peerId);
+    audibleVoicePeers.delete(peerId);
+    if (gatedVoiceTimers.has(peerId)) {
+        clearTimeout(gatedVoiceTimers.get(peerId));
+        gatedVoiceTimers.delete(peerId);
+    }
+}
+
+function releaseVoiceAfterJoin(peerId, alreadyPresent) {
+    if (gatedVoiceTimers.has(peerId)) {
+        clearTimeout(gatedVoiceTimers.get(peerId));
+        gatedVoiceTimers.delete(peerId);
+    }
+    joiningVoicePeers.delete(peerId);
+    if (alreadyPresent || peerId) audibleVoicePeers.add(peerId);
+
+    const ad = document.getElementById('audio-' + peerId);
+    if (!ad) return;
+    delete ad.dataset.joinHold;
+    ad.volume = savedPeerVolume(peerId);
+    ad.muted = isDeafened;
+    const playPromise = ad.play();
+    if (playPromise !== undefined) playPromise.catch(() => {});
+}
+
+function scheduleJoinRelease(peerId) {
+    if (gatedVoiceTimers.has(peerId)) clearTimeout(gatedVoiceTimers.get(peerId));
+    const wait = Math.max(0, joinChimeEndsAt - Date.now());
+    const timer = setTimeout(() => {
+        gatedVoiceTimers.delete(peerId);
+        if (Date.now() + 20 < joinChimeEndsAt) {
+            scheduleJoinRelease(peerId);
+            return;
+        }
+        if (!joiningVoicePeers.has(peerId) && audibleVoicePeers.has(peerId)) return;
+        releaseVoiceAfterJoin(peerId, false);
+    }, wait);
+    gatedVoiceTimers.set(peerId, timer);
+}
+
+function holdRemoteElement(ad) {
+    ad.dataset.joinHold = '1';
+    ad.muted = true;
+    ad.volume = 0;
+}
+
+// Yeni katılanın sesi, giriş zili duyulmadan hoparlöre verilmez.
+function holdVoiceForJoinChime(peerId) {
+    if (!peerId || peerId === myPeerId || audibleVoicePeers.has(peerId)) return;
+    joiningVoicePeers.add(peerId);
+    playVoiceJoinSound();
+    const ad = document.getElementById('audio-' + peerId);
+    if (ad) holdRemoteElement(ad);
+    scheduleJoinRelease(peerId);
 }
 
 function playVoiceLeaveSound() {
@@ -2569,12 +2697,21 @@ function playRemoteAudio(stream, peerId) {
         ad.playsInline = true;
         audioContainer.appendChild(ad);
     }
+    const holdForJoin = joiningVoicePeers.has(peerId) || !audibleVoicePeers.has(peerId);
+    if (holdForJoin) {
+        if (!audibleVoicePeers.has(peerId)) joiningVoicePeers.add(peerId);
+        // Akış bağlanmadan önce kıs; aksi halde zilden önce ses kaçar.
+        holdRemoteElement(ad);
+        playVoiceJoinSound();
+        scheduleJoinRelease(peerId);
+    } else {
+        delete ad.dataset.joinHold;
+        ad.volume = savedPeerVolume(peerId);
+        ad.muted = isDeafened;
+    }
     if (ad.srcObject !== stream) {
         ad.srcObject = stream;
     }
-    const savedVol = (userAudioVolumes[peerId] !== undefined) ? userAudioVolumes[peerId] : 1.0;
-    ad.volume = savedVol;
-    ad.muted = isDeafened;
 
     // Uzaktaki ses izlerinin açık ve çalışır olduğundan emin ol
     try {
