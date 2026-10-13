@@ -92,6 +92,7 @@ const userAudioVolumes = {};
 let activeRoomMessages = [];
 let isSelectionMode = false;
 let selectedMessageIds = new Set();
+let channelUnread = {};
 
 let localScreenStream = null;
 let screenShareCalls = {};
@@ -978,6 +979,7 @@ function openProfileModal(isForceEdit = false) {
         modalAvatarPreview.style.backgroundImage = '';
     }
 
+    if (typeof syncVoiceSettingsUI === 'function') syncVoiceSettingsUI();
     profileModal.style.display = 'flex';
 }
 
@@ -1265,14 +1267,21 @@ function initializePeer() {
             call.answer();
             call.on('stream', remoteStream => {
                 screenShareStreams[call.peer] = remoteStream;
+                if (typeof attachStreamToStage === 'function') {
+                    const uname = (latestVoiceRoomsState[currentVoiceRoom] && latestVoiceRoomsState[currentVoiceRoom][call.peer])
+                        ? latestVoiceRoomsState[currentVoiceRoom][call.peer].username
+                        : 'Kullanıcı';
+                    attachStreamToStage(call.peer, uname, remoteStream);
+                }
                 socket.emit('get-voice-state');
             });
             call.on('close', () => {
                 delete screenShareStreams[call.peer];
                 const watchModal = document.getElementById('screen-watch-modal');
-                if (watchModal.style.display === 'flex' && watchModal.dataset.watchingPeerId === call.peer) {
+                if (watchModal && watchModal.style.display === 'flex' && watchModal.dataset.watchingPeerId === call.peer) {
                     closeScreenWatchModal();
                 }
+                if (typeof clearStreamStageIfPeer === 'function') clearStreamStageIfPeer(call.peer);
                 socket.emit('get-voice-state');
             });
             return;
@@ -1345,11 +1354,14 @@ toggleMicBtn.addEventListener('click', () => {
 });
 
 function applyHardwareStates() {
-    toggleMicBtn.classList.toggle('strikethrough-icon', isMicMuted);
+    const pttOn = !!(window.voiceKeySettings && window.voiceKeySettings.pttEnabled && currentVoiceRoom && !window.pttKeyHeld);
+    const effectivelyMuted = isMicMuted || pttOn;
+    toggleMicBtn.classList.toggle('strikethrough-icon', effectivelyMuted);
     toggleDeafBtn.classList.toggle('strikethrough-icon', isDeafened);
+    document.body.classList.toggle('ptt-active', !!(window.voiceKeySettings && window.voiceKeySettings.pttEnabled && window.pttKeyHeld));
 
     if (localAudioStream) {
-        localAudioStream.getAudioTracks().forEach(track => { track.enabled = !isMicMuted; });
+        localAudioStream.getAudioTracks().forEach(track => { track.enabled = !effectivelyMuted; });
     }
 
     for (let id in voiceCalls) {
@@ -1359,7 +1371,7 @@ function applyHardwareStates() {
         aud.muted = aud.dataset.joinHold === '1' ? true : isDeafened;
     }
 
-    socket.emit('voice-state-update', { mic: !isMicMuted, deaf: !isDeafened });
+    socket.emit('voice-state-update', { mic: !effectivelyMuted, deaf: !isDeafened });
 }
 
 // -----------------------------------------
@@ -1376,10 +1388,7 @@ socket.on('global-users', (usersObj) => {
     }
     usersList.innerHTML = '';
 
-    const sortedIds = Object.keys(allUsersList).sort((a, b) => {
-        const uA = allUsersList[a];
-        const uB = allUsersList[b];
-        // Önce online olanlar, sonra offline; her ikisi içinde admin önce
+    const uniqueUsers = (typeof dedupeUsersMap === 'function' ? dedupeUsersMap(allUsersList) : Object.values(allUsersList)).sort((uA, uB) => {
         if (uA.isOnline && !uB.isOnline) return -1;
         if (!uA.isOnline && uB.isOnline) return 1;
         if (uA.isAdmin && !uB.isAdmin) return -1;
@@ -1391,9 +1400,9 @@ socket.on('global-users', (usersObj) => {
     let onlineHeaderAdded = false;
     let offlineHeaderAdded = false;
 
-    for (let uid of sortedIds) {
-        const u = allUsersList[uid];
-        const isMe = u.peerId === myPeerId;
+    for (const u of uniqueUsers) {
+        const uid = u.userId;
+        const isMe = (u.peerId && u.peerId === myPeerId) || (uid && uid === myUserId);
 
         // Bölüm başlığı
         if (u.isOnline && !onlineHeaderAdded) {
@@ -1544,7 +1553,10 @@ function joinTextRoom(room) {
     if (!room) return;
     currentTextRoom = room;
     localStorage.setItem('lastActiveTextRoom', room);
+    channelUnread[room] = 0;
+    if (typeof updateChannelUnreadBadges === 'function') updateChannelUnreadBadges();
     messages.innerHTML = '';
+    if (typeof clearPendingReply === 'function') clearPendingReply();
     if (socket) {
         socket.emit('join-text-room', room);
     }
@@ -1635,20 +1647,32 @@ function closeImageLightbox() {
 
 const messageSound = new Audio('/sounds/Discord-Mesaj-Sesi-Efekti.wav');
 socket.on('create-message', (message, senderName, msgId, isSystem, image) => {
-    appendMessage(senderName, message, msgId, isSystem, false, image);
-    activeRoomMessages.push({ id: msgId, sender: senderName, text: message, isSystem: isSystem, image: image });
-    
-    // Play sound on new messages
-    if (!isSystem) {
+    const msg = (typeof normalizeIncomingMessage === 'function')
+        ? normalizeIncomingMessage(message, senderName, msgId, isSystem, image)
+        : { id: msgId, sender: senderName, text: message, isSystem: !!isSystem, image: image || null, pinned: false, replyTo: null, reactions: {}, mentions: [] };
+    appendMessage(msg.sender, msg.text, msg.id, msg.isSystem, msg.pinned, msg.image, msg);
+    activeRoomMessages.push(msg);
+    if (!msg.isSystem) {
         messageSound.play().catch(e => console.log("Audio play failed:", e));
     }
 });
 
 socket.on('chat-history', (history) => {
     messages.innerHTML = '';
-    activeRoomMessages = history || [];
+    activeRoomMessages = (history || []).map(m => ({
+        id: m.id,
+        sender: m.sender,
+        text: m.text || '',
+        isSystem: !!m.isSystem,
+        image: m.image || null,
+        pinned: !!m.pinned,
+        replyTo: m.replyTo || null,
+        reactions: m.reactions || {},
+        mentions: m.mentions || [],
+        senderId: m.senderId || null
+    }));
     activeRoomMessages.forEach(msg => {
-        appendMessage(msg.sender, msg.text, msg.id, msg.isSystem, msg.pinned, msg.image);
+        appendMessage(msg.sender, msg.text, msg.id, msg.isSystem, msg.pinned, msg.image, msg);
     });
     messages.scrollTop = messages.scrollHeight;
     updatePinnedMessagesBanner();
@@ -1660,9 +1684,11 @@ chatForm.addEventListener('submit', (e) => {
     if (pendingImage || msg) {
         socket.emit('chat-message', {
             text: msg,
-            image: pendingImage ? pendingImage.dataUrl : null
+            image: pendingImage ? pendingImage.dataUrl : null,
+            replyTo: window.pendingReplyTo || null
         });
         clearPendingImage();
+        if (typeof clearPendingReply === 'function') clearPendingReply();
         chatInput.value = '';
     }
 });
@@ -2332,9 +2358,23 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
     for (let r in voiceRoomsData) {
         const ul = document.getElementById('voice-users-' + r);
         if (ul) {
+            const byName = new Map();
             for (let id in voiceRoomsData[r]) {
                 const userDataObj = voiceRoomsData[r][id];
-
+                const key = (userDataObj.username || id || '').trim().toLowerCase() || id;
+                const prev = byName.get(key);
+                if (!prev) { byName.set(key, { id, userDataObj }); continue; }
+                const score = (pid, data) => {
+                    let s = 0;
+                    if (pid === myPeerId) s += 10;
+                    if (data.avatar) s += 3;
+                    if (data.isSharingScreen) s += 2;
+                    if (data.userId) s += 1;
+                    return s;
+                };
+                if (score(id, userDataObj) >= score(prev.id, prev.userDataObj)) byName.set(key, { id, userDataObj });
+            }
+            for (const { id, userDataObj } of byName.values()) {
                 const li = document.createElement('li');
                 li.className = 'voice-user';
 
@@ -2386,14 +2426,11 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
                     const liveBtn = document.createElement('button');
                     liveBtn.className = 'voice-live-badge';
                     liveBtn.innerHTML = 'YAYIN';
-                    if (id !== myPeerId) {
-                        liveBtn.onclick = (e) => {
-                            e.stopPropagation();
-                            watchScreenShare(id, userDataObj.username || "Kullanıcı");
-                        };
-                    } else {
-                        liveBtn.style.cursor = 'default';
-                    }
+                    liveBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        if (typeof openStreamStage === 'function') openStreamStage(id, userDataObj.username || 'Kullanıcı');
+                        else watchScreenShare(id, userDataObj.username || 'Kullanıcı');
+                    };
                     statesContainer.appendChild(liveBtn);
                 }
 
@@ -2434,6 +2471,11 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
 
     if (currentVoiceRoom) {
         checkAndHealVoice();
+        const roomPeers = voiceRoomsData[currentVoiceRoom] || {};
+        const sharer = Object.keys(roomPeers).find(pid => roomPeers[pid] && roomPeers[pid].isSharingScreen);
+        if (sharer && typeof ensureStreamStageForPeer === 'function') {
+            ensureStreamStageForPeer(sharer, roomPeers[sharer].username || 'Kullanıcı');
+        }
     }
 });
 
@@ -3110,11 +3152,14 @@ socket.on('channels-list', ({ text, voice }) => {
                 deleteBtn = `<button class="delete-channel-btn" onclick="event.stopPropagation(); deleteChannel('${ch}', 'text')" title="Kanalı Sil">×</button>`;
             }
             
+            const unread = channelUnread[roomName] || 0;
+            if (unread > 0) li.classList.add('has-unread');
             li.innerHTML = `
                 <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
                     <div style="display:flex; align-items:center;">
                         <svg width="20" height="24" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 6px;"><path d="M16 4h-2l-1 5h-5l1-5h-2l-1 5h-4v2h3.5l-1 5h-3.5v2h3.5l-1 5h2l1-5h5l-1 5h2l1-5h4v-2h-3.5l1-5h3.5v-2h-3.5l1-5zm-3 12h-5l1-5h5l-1 5z"/></svg>
-                        <span>${ch}</span>
+                        <span class="channel-name">${ch}</span>
+                        ${unread > 0 ? `<span class="channel-unread-badge">${unread > 99 ? '99+' : unread}</span>` : ''}
                     </div>
                     ${deleteBtn}
                 </div>
@@ -3358,8 +3403,10 @@ function stopScreenSharing() {
     if (modal && modal.style.display === 'flex' && modal.dataset.watchingPeerId === myPeerId) {
         closeScreenWatchModal();
     }
+    if (typeof clearStreamStageIfPeer === 'function') clearStreamStageIfPeer(myPeerId);
+    if (typeof stopStreamRecording === 'function') stopStreamRecording();
     for (let pId in screenShareCalls) {
-        screenShareCalls[pId].close();
+        try { screenShareCalls[pId].close(); } catch (e) {}
     }
     screenShareCalls = {};
     socket.emit('stop-screen-share');
@@ -3368,44 +3415,9 @@ function stopScreenSharing() {
 }
 
 function watchScreenShare(peerId, username) {
-    const modal = document.getElementById('screen-watch-modal');
-    const video = document.getElementById('screen-watch-video');
-    const title = document.getElementById('screen-watch-title').querySelector('span');
-    const loadingIndicator = document.getElementById('screen-watch-loading');
-    
-    title.textContent = `📺 ${username} adlı kişinin yayını izleniyor`;
-    modal.dataset.watchingPeerId = peerId;
-    modal.style.display = 'flex';
-    
-    if (screenShareStreams[peerId]) {
-        video.srcObject = screenShareStreams[peerId];
-        if (loadingIndicator) loadingIndicator.style.display = 'none';
-    } else {
-        if (loadingIndicator) {
-            loadingIndicator.style.display = 'flex';
-            const textEl = loadingIndicator.querySelector('span');
-            if (textEl) textEl.textContent = "Yayın akışına bağlanılıyor...";
-            const spinner = loadingIndicator.querySelector('div');
-            if (spinner) spinner.style.display = 'block';
-        }
-        socket.emit('request-screen-share-stream', { targetPeerId: peerId, requesterPeerId: myPeerId });
-        
-        // Timeout if stream never arrives
-        setTimeout(() => {
-            if (modal.style.display === 'flex' && modal.dataset.watchingPeerId === peerId) {
-                if (screenShareStreams[peerId]) {
-                    video.srcObject = screenShareStreams[peerId];
-                    if (loadingIndicator) loadingIndicator.style.display = 'none';
-                } else {
-                    if (loadingIndicator) {
-                        const textEl = loadingIndicator.querySelector('span');
-                        if (textEl) textEl.textContent = "Hata: Yayın akışı alınamadı.";
-                        const spinner = loadingIndicator.querySelector('div');
-                        if (spinner) spinner.style.display = 'none';
-                    }
-                }
-            }
-        }, 3000);
+    if (typeof openStreamStage === 'function') {
+        openStreamStage(peerId, username || 'Kullanıcı');
+        return;
     }
 }
 
@@ -3496,6 +3508,18 @@ if (screenShareCancelBtn) {
     });
 }
 
+const sharePresetEl = document.getElementById('share-preset');
+if (sharePresetEl) {
+    sharePresetEl.addEventListener('change', () => {
+        const preset = sharePresetEl.value;
+        const resEl = document.getElementById('share-resolution');
+        const fpsEl = document.getElementById('share-fps');
+        if (preset === 'meeting') { resEl.value = '720'; fpsEl.value = '30'; }
+        else if (preset === 'game') { resEl.value = '1080'; fpsEl.value = '60'; }
+        else if (preset === 'weak') { resEl.value = '480'; fpsEl.value = '24'; }
+    });
+}
+
 if (screenShareStartBtn) {
     screenShareStartBtn.addEventListener('click', async () => {
         screenShareSettingsModal.style.display = 'none';
@@ -3505,6 +3529,7 @@ if (screenShareStartBtn) {
         
         let width, height;
         if (resolution === "360") { width = 640; height = 360; }
+        else if (resolution === "480") { width = 854; height = 480; }
         else if (resolution === "720") { width = 1280; height = 720; }
         else { width = 1920; height = 1080; }
         
@@ -3522,17 +3547,7 @@ if (screenShareStartBtn) {
             if (bottomShareScreenBtn) bottomShareScreenBtn.classList.add('strikethrough-icon');
             socket.emit('start-screen-share');
 
-            // Open watch modal showing own screen share stream
-            const modal = document.getElementById('screen-watch-modal');
-            const video = document.getElementById('screen-watch-video');
-            const title = document.getElementById('screen-watch-title').querySelector('span');
-            const loadingIndicator = document.getElementById('screen-watch-loading');
-
-            title.textContent = `📺 Kendi yayınınız izleniyor`;
-            modal.dataset.watchingPeerId = myPeerId;
-            video.srcObject = localScreenStream;
-            if (loadingIndicator) loadingIndicator.style.display = 'none';
-            modal.style.display = 'flex';
+            if (typeof openStreamStage === 'function') openStreamStage(myPeerId, myUsername || 'Sen', localScreenStream);
             
             for (let peerId in voiceCalls) {
                 const call = peer.call(peerId, localScreenStream, { metadata: { type: 'screen-share' } });
@@ -3783,12 +3798,11 @@ function updateServerUsersList(server) {
     const listEl = document.getElementById('users-list');
     if (!listEl) return;
     listEl.innerHTML = '';
-    
-    document.getElementById('right-panel-header-title').textContent = `KULLANICILAR — ${server.members.length}`;
 
-    const sortedIds = Object.keys(allUsersList).sort((a, b) => {
-        const uA = allUsersList[a];
-        const uB = allUsersList[b];
+    const uniqueUsers = (typeof dedupeUsersMap === 'function'
+        ? dedupeUsersMap(allUsersList, server.members || [])
+        : Object.values(allUsersList).filter(u => server.members.includes(u.userId))
+    ).sort((uA, uB) => {
         if (uA.isOnline && !uB.isOnline) return -1;
         if (!uA.isOnline && uB.isOnline) return 1;
         if (uA.isAdmin && !uB.isAdmin) return -1;
@@ -3796,15 +3810,14 @@ function updateServerUsersList(server) {
         return (uA.username || '').localeCompare(uB.username || '');
     });
 
+    document.getElementById('right-panel-header-title').textContent = `KULLANICILAR — ${uniqueUsers.length}`;
+
     let onlineHeaderAdded = false;
     let offlineHeaderAdded = false;
 
-    sortedIds.forEach(uid => {
-        // Display user only if they are a member of this server
-        if (!server.members.includes(uid)) return;
-
-        const u = allUsersList[uid];
-        const isMe = u.peerId === myPeerId;
+    uniqueUsers.forEach(u => {
+        const uid = u.userId;
+        const isMe = (u.peerId && u.peerId === myPeerId) || (uid && uid === myUserId);
 
         if (u.isOnline && !onlineHeaderAdded) {
             const hdr = document.createElement('li');
