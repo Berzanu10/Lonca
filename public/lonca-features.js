@@ -312,11 +312,6 @@
         messages.scrollTop = messages.scrollHeight;
     };
 
-    // create-message / history / reactions dinleyicileri (script.js ile uyumlu)
-    socket.off && socket.off('create-message');
-    // socket.io v4: removeAllListeners for this event then rebind carefully via monkeypatch of handler result
-    // Daha güvenli: script.js handler'ını bozmadan normalize eden sarmalayıcı — script.js'i patch'leyeceğiz.
-
     socket.on('message-reactions', ({ msgId, reactions }) => {
         const msg = activeRoomMessages.find(m => m.id === msgId);
         if (msg) msg.reactions = reactions || {};

@@ -1650,7 +1650,7 @@ socket.on('create-message', (message, senderName, msgId, isSystem, image) => {
     const msg = (typeof normalizeIncomingMessage === 'function')
         ? normalizeIncomingMessage(message, senderName, msgId, isSystem, image)
         : { id: msgId, sender: senderName, text: message, isSystem: !!isSystem, image: image || null, pinned: false, replyTo: null, reactions: {}, mentions: [] };
-    appendMessage(msg.sender, msg.text, msg.id, msg.isSystem, msg.pinned, msg.image, msg);
+    (window.appendMessage || appendMessage)(msg.sender, msg.text, msg.id, msg.isSystem, msg.pinned, msg.image, msg);
     activeRoomMessages.push(msg);
     if (!msg.isSystem) {
         messageSound.play().catch(e => console.log("Audio play failed:", e));
@@ -1672,7 +1672,7 @@ socket.on('chat-history', (history) => {
         senderId: m.senderId || null
     }));
     activeRoomMessages.forEach(msg => {
-        appendMessage(msg.sender, msg.text, msg.id, msg.isSystem, msg.pinned, msg.image, msg);
+        (window.appendMessage || appendMessage)(msg.sender, msg.text, msg.id, msg.isSystem, msg.pinned, msg.image, msg);
     });
     messages.scrollTop = messages.scrollHeight;
     updatePinnedMessagesBanner();

@@ -1457,6 +1457,40 @@ function extractMentions(text) {
    return [...found];
 }
 
+function historyMessageFromDoc(doc) {
+   return {
+      id: doc.id,
+      sender: doc.sender,
+      senderId: doc.senderId || null,
+      text: doc.text || '',
+      image: doc.image || null,
+      timestamp: doc.timestamp,
+      pinned: !!doc.pinned,
+      isSystem: !!doc.isSystem,
+      pinnedMsgId: doc.pinnedMsgId || null,
+      replyTo: doc.replyTo || null,
+      reactions: doc.reactions || {},
+      mentions: doc.mentions || []
+   };
+}
+
+function mergeDocIntoRoomHistory(roomId, doc) {
+   if (!doc || !doc.id || deletedMessageIds.has(doc.id)) return;
+   if (!messageHistory[roomId]) messageHistory[roomId] = [];
+   const existing = messageHistory[roomId].find(m => m && m.id === doc.id);
+   if (!existing) {
+      messageHistory[roomId].push(historyMessageFromDoc(doc));
+      return;
+   }
+   if (!existing.replyTo && doc.replyTo) existing.replyTo = doc.replyTo;
+   const docReactions = doc.reactions && typeof doc.reactions === 'object' ? doc.reactions : null;
+   const existingCount = existing.reactions && typeof existing.reactions === 'object' ? Object.keys(existing.reactions).length : 0;
+   if (docReactions && Object.keys(docReactions).length && existingCount === 0) existing.reactions = docReactions;
+   if ((!existing.mentions || !existing.mentions.length) && Array.isArray(doc.mentions) && doc.mentions.length) {
+      existing.mentions = doc.mentions;
+   }
+}
+
 function buildMessagePayload(msgObj) {
    return {
       id: msgObj.id,
@@ -1932,47 +1966,15 @@ io.on('connection', (socket) => {
             }).sort({ timestamp: 1 }).lean();
 
             if (docs && docs.length > 0) {
-               if (!messageHistory[roomId]) messageHistory[roomId] = [];
-               docs.forEach(doc => {
-                  if (!doc || !doc.id || deletedMessageIds.has(doc.id)) return;
-                  if (!messageHistory[roomId].some(m => m.id === doc.id)) {
-                     messageHistory[roomId].push({
-                        id: doc.id,
-                        sender: doc.sender,
-                        senderId: doc.senderId || null,
-                        text: doc.text || '',
-                        image: doc.image || null,
-                        timestamp: doc.timestamp,
-                        pinned: !!doc.pinned,
-                        isSystem: !!doc.isSystem,
-                        pinnedMsgId: doc.pinnedMsgId || null
-                     });
-                  }
-               });
-               messageHistory[roomId] = messageHistory[roomId].filter(m => m && m.id && !deletedMessageIds.has(m.id));
+               docs.forEach(doc => mergeDocIntoRoomHistory(roomId, doc));
+               messageHistory[roomId] = (messageHistory[roomId] || []).filter(m => m && m.id && !deletedMessageIds.has(m.id));
                messageHistory[roomId].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
 
                // Ayna odayı da senkronize et
                if (mirrorMap[roomId]) {
                   const mRoom = mirrorMap[roomId];
-                  if (!messageHistory[mRoom]) messageHistory[mRoom] = [];
-                  docs.forEach(doc => {
-                     if (!doc || !doc.id || deletedMessageIds.has(doc.id)) return;
-                     if (!messageHistory[mRoom].some(m => m.id === doc.id)) {
-                        messageHistory[mRoom].push({
-                           id: doc.id,
-                           sender: doc.sender,
-                           senderId: doc.senderId || null,
-                           text: doc.text || '',
-                           image: doc.image || null,
-                           timestamp: doc.timestamp,
-                           pinned: !!doc.pinned,
-                           isSystem: !!doc.isSystem,
-                           pinnedMsgId: doc.pinnedMsgId || null
-                        });
-                     }
-                  });
-                  messageHistory[mRoom] = messageHistory[mRoom].filter(m => m && m.id && !deletedMessageIds.has(m.id));
+                  docs.forEach(doc => mergeDocIntoRoomHistory(mRoom, doc));
+                  messageHistory[mRoom] = (messageHistory[mRoom] || []).filter(m => m && m.id && !deletedMessageIds.has(m.id));
                   messageHistory[mRoom].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
                }
             }
@@ -2099,30 +2101,39 @@ io.on('connection', (socket) => {
       const allowed = ['👍', '❤️', '😂', '🔥', '😮', '👏'];
       if (!allowed.includes(emoji)) return;
 
-      let targetRoom = null;
-      let targetMsg = null;
+      const matches = [];
       for (const room in messageHistory) {
-         const m = (messageHistory[room] || []).find(x => x.id === msgId);
-         if (m) {
-            targetRoom = room;
-            targetMsg = m;
-            break;
-         }
+         const m = (messageHistory[room] || []).find(x => x && x.id === msgId);
+         if (m) matches.push({ room, msg: m });
       }
-      if (!targetMsg) return;
+      if (!matches.length) return;
 
-      if (!targetMsg.reactions || typeof targetMsg.reactions !== 'object') targetMsg.reactions = {};
+      const primary = matches.find(x => x.room === socket.textRoom) || matches[0];
+      const targetMsg = primary.msg;
+      if (!targetMsg.reactions || typeof targetMsg.reactions !== 'object' || Array.isArray(targetMsg.reactions)) {
+         targetMsg.reactions = {};
+      }
       if (!Array.isArray(targetMsg.reactions[emoji])) targetMsg.reactions[emoji] = [];
       const idx = targetMsg.reactions[emoji].indexOf(socket.username);
       if (idx >= 0) targetMsg.reactions[emoji].splice(idx, 1);
       else targetMsg.reactions[emoji].push(socket.username);
       if (targetMsg.reactions[emoji].length === 0) delete targetMsg.reactions[emoji];
 
-      saveMessages(targetRoom, targetMsg);
-      io.to('text-' + targetRoom).emit('message-reactions', {
-         msgId,
-         reactions: targetMsg.reactions
-      });
+      const reactions = targetMsg.reactions;
+      for (const entry of matches) {
+         if (entry.msg !== targetMsg) entry.msg.reactions = reactions;
+      }
+
+      saveMessages(primary.room, targetMsg);
+
+      const payload = { msgId, reactions };
+      const emitted = new Set();
+      for (const entry of matches) {
+         if (emitted.has(entry.room)) continue;
+         emitted.add(entry.room);
+         io.to('text-' + entry.room).emit('message-reactions', payload);
+      }
+      socket.emit('message-reactions', payload);
    });
 
    socket.on('delete-message', (msgId) => {
