@@ -92,21 +92,41 @@ function saveUsers() {
 }
 
 // CRYPTO HELPERS FOR PASSWORDS
+const PBKDF2_ITERATIONS = 120000;
+
 function hashPassword(password) {
    const salt = crypto.randomBytes(16).toString('hex');
-   const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
-   return `${salt}:${hash}`;
+   const hash = crypto.pbkdf2Sync(password, salt, PBKDF2_ITERATIONS, 64, 'sha512').toString('hex');
+   return `v2$${PBKDF2_ITERATIONS}$${salt}$${hash}`;
+}
+
+function safeEqualStr(a, b) {
+   const ba = Buffer.from(String(a));
+   const bb = Buffer.from(String(b));
+   return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
 }
 
 function verifyPassword(password, storedPassword) {
-   if (!storedPassword || !storedPassword.includes(':')) return false;
+   if (!storedPassword || typeof password !== 'string') return false;
+   if (storedPassword.startsWith('v2$')) {
+      const [, iter, salt, hash] = storedPassword.split('$');
+      const verifyHash = crypto.pbkdf2Sync(password, salt, parseInt(iter, 10), 64, 'sha512').toString('hex');
+      return safeEqualStr(hash, verifyHash);
+   }
+   // Eski format (salt:hash, 1000 iterasyon) — mevcut kullanıcılar giriş yapabilsin
+   if (!storedPassword.includes(':')) return false;
    const [salt, hash] = storedPassword.split(':');
    const verifyHash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
-   return hash === verifyHash;
+   return safeEqualStr(hash, verifyHash);
 }
 
 // PURE NODE.JS JWT SYSTEM (ZERO DEPENDENCIES)
-const JWT_SECRET = process.env.JWT_SECRET || 'lonca_super_secret_fallback_key_123';
+// JWT_SECRET tanımlı değilse tahmin edilebilir sabit anahtar yerine rastgele (yeniden başlatmada oturumlar düşer) kullan
+const JWT_SECRET = process.env.JWT_SECRET || (() => {
+   console.warn('[GÜVENLİK] JWT_SECRET tanımlı değil! Rastgele geçici anahtar kullanılıyor.');
+   return crypto.randomBytes(48).toString('hex');
+})();
+const IS_PRODUCTION = process.env.NODE_ENV === 'production' || !!process.env.RENDER_EXTERNAL_URL;
 const SESSION_COOKIE_NAME = 'lonca_session';
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 180; // 180 gün
 
@@ -123,7 +143,7 @@ function verifyToken(token) {
       if (parts.length !== 3) return null;
       const [header, body, signature] = parts;
       const validSignature = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${body}`).digest('base64url');
-      if (signature !== validSignature) return null;
+      if (!safeEqualStr(signature, validSignature)) return null;
       return JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
    } catch (e) {
       return null;
@@ -210,6 +230,22 @@ function authenticateToken(req, res, next) {
 }
 
 // GET CURRENT USER (/api/auth/me)
+// Basit bellek içi hız sınırlayıcı (kaba kuvvet denemelerine karşı)
+const rateBuckets = new Map();
+function rateLimit(maxHits, windowMs) {
+   return (req, res, next) => {
+      const key = req.path + '|' + (req.ip || '');
+      const now = Date.now();
+      const b = rateBuckets.get(key);
+      if (!b || b.reset < now) { rateBuckets.set(key, { hits: 1, reset: now + windowMs }); return next(); }
+      b.hits++;
+      if (b.hits > maxHits) return res.status(429).json({ error: 'Çok fazla deneme. Lütfen biraz bekleyin.' });
+      next();
+   };
+}
+setInterval(() => { const n = Date.now(); for (const [k, b] of rateBuckets) if (b.reset < n) rateBuckets.delete(k); }, 10 * 60 * 1000).unref();
+app.use(['/api/auth/login', '/api/auth/register', '/api/auth/forgot-password', '/api/auth/reset-password', '/api/auth/google'], rateLimit(20, 10 * 60 * 1000));
+
 app.get('/api/auth/me', (req, res) => {
    const token = getRequestToken(req);
    if (!token) return res.status(401).json({ error: 'Token bulunamadı.' });
@@ -328,11 +364,28 @@ app.post('/api/auth/login', (req, res) => {
 });
 
 // GOOGLE SIGN IN
-app.post('/api/auth/google', (req, res) => {
+async function verifyGoogleCredential(credential) {
+   // İmzayı Google doğrular; aud (client id) bizim uygulamamız olmalı
+   const r = await fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(credential));
+   if (!r.ok) return null;
+   const info = await r.json();
+   if (!info || !info.email || !info.sub) return null;
+   if (info.iss !== 'accounts.google.com' && info.iss !== 'https://accounts.google.com') return null;
+   if (process.env.GOOGLE_CLIENT_ID && info.aud !== process.env.GOOGLE_CLIENT_ID) return null;
+   if (info.email_verified !== true && info.email_verified !== 'true') return null;
+   if (info.exp && Number(info.exp) * 1000 < Date.now()) return null;
+   return info;
+}
+
+// Mock giriş yalnızca production dışında ve gerçek Google istemcisi tanımlı değilken (veya açıkça izin verilirse) çalışır
+const ALLOW_MOCK_GOOGLE = process.env.ALLOW_MOCK_GOOGLE === 'true' || (!IS_PRODUCTION && !process.env.GOOGLE_CLIENT_ID);
+
+app.post('/api/auth/google', async (req, res) => {
    const { credential, mock, email, name, picture } = req.body;
    let googleEmail, googleName, googlePicture, googleSub;
 
    if (mock) {
+      if (!ALLOW_MOCK_GOOGLE) return res.status(403).json({ error: 'Mock giriş bu ortamda devre dışı.' });
       if (!email) return res.status(400).json({ error: 'Mock e-posta adresi eksik.' });
       googleEmail = email.toLowerCase().trim();
       googleName = name || googleEmail.split('@')[0];
@@ -340,8 +393,9 @@ app.post('/api/auth/google', (req, res) => {
       googleSub = 'mock_google_' + googleEmail;
    } else {
       if (!credential) return res.status(400).json({ error: 'Google kimlik verisi eksik.' });
-      const decoded = decodeJwt(credential);
-      if (!decoded || (decoded.iss !== 'accounts.google.com' && decoded.iss !== 'https://accounts.google.com')) {
+      let decoded = null;
+      try { decoded = await verifyGoogleCredential(credential); } catch (e) { console.error('[Google] Doğrulama hatası:', e.message); }
+      if (!decoded) {
          return res.status(400).json({ error: 'Geçersiz Google kimlik doğrulaması.' });
       }
       googleEmail = decoded.email.toLowerCase().trim();
@@ -470,9 +524,10 @@ app.post('/api/auth/forgot-password', (req, res) => {
    }
 
    const code = Math.floor(100000 + Math.random() * 900000).toString();
-   passwordResetCodes.set(normalizedEmail, code);
+   passwordResetCodes.set(normalizedEmail, { code, expires: Date.now() + 15 * 60 * 1000, attempts: 0 });
 
-   console.log(`[ŞİFRE SIFIRLAMA] Kullanıcı: ${normalizedEmail}, Kod: ${code}`);
+   // Kod yalnızca e-posta altyapısı yoksa (yerel geliştirme) konsola yazılır
+   if (!transporter && !IS_PRODUCTION) console.log(`[ŞİFRE SIFIRLAMA] Kullanıcı: ${normalizedEmail}, Kod: ${code}`);
 
    // Send real e-mail using Nodemailer
    if (transporter) {
@@ -528,8 +583,13 @@ app.post('/api/auth/reset-password', (req, res) => {
       return res.status(400).json({ error: 'Kullanıcı bulunamadı.' });
    }
 
-   const storedCode = passwordResetCodes.get(normalizedEmail);
-   if (!storedCode || storedCode !== code.trim()) {
+   const entry = passwordResetCodes.get(normalizedEmail);
+   if (!entry || entry.expires < Date.now() || entry.attempts >= 5) {
+      passwordResetCodes.delete(normalizedEmail);
+      return res.status(400).json({ error: 'Geçersiz veya süresi dolmuş sıfırlama kodu.' });
+   }
+   if (!safeEqualStr(entry.code, String(code).trim())) {
+      entry.attempts++;
       return res.status(400).json({ error: 'Geçersiz veya süresi dolmuş sıfırlama kodu.' });
    }
 
@@ -1849,20 +1909,37 @@ async function syncSeenUsersWithMongo() {
    }
 }
 
-const ADMIN_KEY = process.env.ADMIN_KEY || "berzan123";
+const ADMIN_KEY = process.env.ADMIN_KEY || null; // Varsayılan anahtar yok: tanımlı değilse admin anahtarı girişi kapalı
+
+// Socket kimliği oturum çerezi / token ile doğrulanır; istemcinin söylediği userId'ye güvenilmez
+io.use((socket, next) => {
+   try {
+      let token = socket.handshake.auth && socket.handshake.auth.token;
+      if (!token) {
+         const cookies = socket.handshake.headers.cookie || '';
+         const c = cookies.split(';').map(v => v.trim()).find(v => v.startsWith(`${SESSION_COOKIE_NAME}=`));
+         if (c) token = decodeURIComponent(c.slice(SESSION_COOKIE_NAME.length + 1));
+      }
+      const payload = token ? verifyToken(token) : null;
+      socket.authUserId = payload && usersDb[payload.userId] ? payload.userId : null;
+   } catch (e) { socket.authUserId = null; }
+   next();
+});
 
 io.on('connection', (socket) => {
    socket.voiceState = { mic: true, deaf: false }; // Kullanıcının varsayılan donanım durumu
 
-   socket.on('register', (peerId, username, userId, avatar, adminToken) => {
-      const uId = userId || peerId;
+   socket.on('register', (peerId, username, userId, avatar, adminToken, sessionToken) => {
+      // Kayıtlı bir hesap kimliği ancak oturumu doğrulanmış sahibi tarafından kullanılabilir
+      if (sessionToken) { const pl = verifyToken(String(sessionToken)); if (pl && usersDb[pl.userId]) socket.authUserId = pl.userId; }
+      const uId = socket.authUserId || ((userId && usersDb[userId]) ? peerId : (userId || peerId));
       const previousPeerId = socket.peerId || null;
       socket.peerId = peerId;
       
       // Get stored user info from DB if possible
       let finalUsername = username;
       let finalAvatar = avatar || '';
-      let isAdmin = (adminToken === ADMIN_KEY);
+      let isAdmin = !!(ADMIN_KEY && adminToken === ADMIN_KEY);
       
       if (usersDb[uId]) {
          finalUsername = usersDb[uId].username || username;
@@ -2001,10 +2078,10 @@ io.on('connection', (socket) => {
          let replyTo = null;
 
          if (typeof data === 'string') {
-            text = data.trim();
+            text = data.trim().slice(0, 4000);
          } else if (typeof data === 'object' && data !== null) {
-            text = (data.text || '').trim();
-            image = data.image || null;
+            text = String(data.text || '').trim().slice(0, 4000);
+            image = (typeof data.image === 'string' && data.image.startsWith('data:image/')) ? data.image : null;
             if (data.replyTo && data.replyTo.id) {
                replyTo = {
                   id: data.replyTo.id,

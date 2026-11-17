@@ -392,7 +392,13 @@
             pttToggle.addEventListener('change', () => {
                 voiceKeySettings.pttEnabled = pttToggle.checked;
                 saveVoiceKeySettings();
-                if (voiceKeySettings.pttEnabled) isMicMuted = true;
+                if (voiceKeySettings.pttEnabled) {
+                    isMicMuted = true;
+                } else if (!isDeafened) {
+                    isMicMuted = false;
+                }
+                pttKeyHeld = false;
+                window.pttKeyHeld = false;
                 applyHardwareStates();
             });
         }
@@ -434,6 +440,7 @@
         if (isTypingInField(document.activeElement) || e.repeat) return;
         if (voiceKeySettings.pttEnabled && e.code === voiceKeySettings.pttKey && currentVoiceRoom) {
             e.preventDefault();
+            if (isDeafened) return;
             pttKeyHeld = true;
             window.pttKeyHeld = true;
             applyHardwareStates();
@@ -441,7 +448,7 @@
         }
         if (e.code === voiceKeySettings.muteKey && currentVoiceRoom) {
             e.preventDefault();
-            if (voiceKeySettings.pttEnabled) return;
+            if (voiceKeySettings.pttEnabled || isDeafened) return;
             isMicMuted = !isMicMuted;
             applyHardwareStates();
         }

@@ -2,7 +2,7 @@ const socket = io('/');
 
 socket.on('connect', () => {
     if (myPeerId && myUsername) {
-        socket.emit('register', myPeerId, myUsername, myUserId, myAvatar, myAdminToken);
+        socket.emit('register', myPeerId, myUsername, myUserId, myAvatar, myAdminToken, localStorage.getItem('sessionToken'));
     }
     const savedRoom = localStorage.getItem('lastActiveTextRoom') || currentTextRoom;
     if (savedRoom && socket.connected) {
@@ -1207,7 +1207,7 @@ function initializePeer() {
     peer.on('open', id => {
         myPeerId = id;
         console.log('[PeerJS] Bağlantı başarılı, Peer ID:', myPeerId);
-        socket.emit('register', myPeerId, myUsername, myUserId, myAvatar, myAdminToken);
+        socket.emit('register', myPeerId, myUsername, myUserId, myAvatar, myAdminToken, localStorage.getItem('sessionToken'));
         loadServersAndInit(true);
 
         // Eğer bir ses odasındayken peer yeni id aldıysa veya yeniden bağlandıysa odaya senkronize ol
@@ -1353,6 +1353,9 @@ toggleMicBtn.addEventListener('click', () => {
     applyHardwareStates();
 });
 
+let lastSentVoiceState = null;
+socket.on('connect', () => { lastSentVoiceState = null; });
+
 function applyHardwareStates() {
     const pttOn = !!(window.voiceKeySettings && window.voiceKeySettings.pttEnabled && currentVoiceRoom && !window.pttKeyHeld);
     const effectivelyMuted = isMicMuted || pttOn;
@@ -1371,7 +1374,11 @@ function applyHardwareStates() {
         aud.muted = aud.dataset.joinHold === '1' ? true : isDeafened;
     }
 
-    socket.emit('voice-state-update', { mic: !effectivelyMuted, deaf: !isDeafened });
+    const nextVoiceState = { mic: !effectivelyMuted, deaf: !isDeafened };
+    if (!lastSentVoiceState || lastSentVoiceState.mic !== nextVoiceState.mic || lastSentVoiceState.deaf !== nextVoiceState.deaf) {
+        lastSentVoiceState = nextVoiceState;
+        socket.emit('voice-state-update', nextVoiceState);
+    }
 }
 
 // -----------------------------------------
@@ -2055,6 +2062,7 @@ async function connectVoiceRoom(room) {
     }
 
     currentVoiceRoom = room;
+    applyHardwareStates();
     // Odaya girerken mevcut kullanıcıları kaydet ki onlar için tekrar giriş sesi çalmasın
     if (latestVoiceRoomsState && latestVoiceRoomsState[room]) {
         knownVoicePeers = new Set(Object.keys(latestVoiceRoomsState[room]).filter(id => id && id !== myPeerId));
@@ -2089,7 +2097,9 @@ async function connectVoiceRoom(room) {
 
     // Sunucuya donanım durumumuzu güncellet
     setTimeout(() => {
-        socket.emit('voice-state-update', { mic: !isMicMuted, deaf: !isDeafened });
+        // PTT / sağırlık dahil gerçek durumu gönder (isMicMuted tek başına yanıltıcı)
+        lastSentVoiceState = null;
+        applyHardwareStates();
         checkAndHealVoice();
     }, 200);
 }
@@ -2353,7 +2363,11 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
         });
     }
 
-    document.querySelectorAll('.voice-users').forEach(ul => ul.innerHTML = '');
+    // Verisi olmayan odaların listesini boşalt (diğerleri aşağıda gerekirse yeniden çizilir)
+    document.querySelectorAll('.voice-users').forEach(ul => {
+        const roomId = ul.id.replace('voice-users-', '');
+        if (!voiceRoomsData || !voiceRoomsData[roomId]) { ul.innerHTML = ''; delete ul.dataset.sig; }
+    });
 
     for (let r in voiceRoomsData) {
         const ul = document.getElementById('voice-users-' + r);
@@ -2374,9 +2388,33 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
                 };
                 if (score(id, userDataObj) >= score(prev.id, prev.userDataObj)) byName.set(key, { id, userDataObj });
             }
+            // Yalnızca mic/deaf durumu değiştiyse listeyi yeniden çizme, ikonları yerinde güncelle
+            const sig = (amIAdmin ? 'A' : 'U') + '|' + (currentVoiceRoom === r ? 'in' : 'out') + '|' + myPeerId + '|' +
+                [...byName.values()].map(({ id, userDataObj }) =>
+                    [id, userDataObj.username || '', userDataObj.avatar ? userDataObj.avatar.length : 0, userDataObj.isSharingScreen ? 1 : 0].join(':')
+                ).join(',');
+            if (ul.dataset.sig === sig) {
+                for (const { id, userDataObj } of byName.values()) {
+                    const li = ul.querySelector('li[data-peer-id="' + id + '"]');
+                    if (!li) continue;
+                    const mi = li.querySelector('.mic-state');
+                    const di = li.querySelector('.deaf-state');
+                    if (mi) mi.classList.toggle('strikethrough-icon', userDataObj.mic === false);
+                    if (di) di.classList.toggle('strikethrough-icon', userDataObj.deaf === false);
+                }
+                continue;
+            }
+            const openVolumes = new Set();
+            ul.querySelectorAll('li[data-peer-id]').forEach(old => {
+                const v = old.querySelector('.voice-volume-control');
+                if (v && v.style.display === 'block') openVolumes.add(old.dataset.peerId);
+            });
+            ul.innerHTML = '';
+            ul.dataset.sig = sig;
             for (const { id, userDataObj } of byName.values()) {
                 const li = document.createElement('li');
                 li.className = 'voice-user';
+                li.dataset.peerId = id;
 
                 const mainDiv = document.createElement('div');
                 mainDiv.className = 'voice-user-info';
@@ -2399,12 +2437,12 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
                 statesContainer.className = 'voice-user-states';
 
                 const mIcon = document.createElement('div');
-                mIcon.className = (userDataObj.mic === false) ? 'state-icon strikethrough-icon' : 'state-icon';
+                mIcon.className = (userDataObj.mic === false) ? 'state-icon mic-state strikethrough-icon' : 'state-icon mic-state';
                 mIcon.innerHTML = micSVG;
                 statesContainer.appendChild(mIcon);
 
                 const dIcon = document.createElement('div');
-                dIcon.className = (userDataObj.deaf === false) ? 'state-icon strikethrough-icon' : 'state-icon';
+                dIcon.className = (userDataObj.deaf === false) ? 'state-icon deaf-state strikethrough-icon' : 'state-icon deaf-state';
                 dIcon.innerHTML = headSVG;
                 statesContainer.appendChild(dIcon);
 
@@ -2440,7 +2478,7 @@ socket.on('voice-rooms-state', (voiceRoomsData) => {
                 if (id !== myPeerId && currentVoiceRoom === r) {
                     const volDiv = document.createElement('div');
                     volDiv.className = 'voice-volume-control';
-                    volDiv.style.display = 'none';
+                    volDiv.style.display = openVolumes.has(id) ? 'block' : 'none';
 
                     const lbl = document.createElement('div');
                     lbl.textContent = '🔉 Kullanıcı Sesi';
@@ -2501,6 +2539,7 @@ function disconnectVoiceRoom(playSound = true) {
     }
 
     socket.emit('join-voice-room', null);
+    lastSentVoiceState = null;
     document.querySelectorAll('.voice-channel').forEach(c => c.classList.remove('active'));
     voiceConnectionInfo.style.display = 'none';
     currentVoiceRoom = null;
