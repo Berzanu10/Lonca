@@ -440,6 +440,7 @@
                   <button type="button" id="reply-bar-cancel" class="reply-bar-cancel" title="İptal">×</button>
                </div>
 
+               <div id="typing-indicator" class="typing-indicator" style="visibility: hidden;" aria-live="polite"></div>
                <form id="chat-form">
                   <input type="file" id="image-file-input" accept="image/*" style="display: none;">
                   <button type="button" id="attach-image-btn" class="chat-attach-btn" title="Fotoğraf / Görsel Gönder">
@@ -555,6 +556,22 @@
                   <label class="voice-settings-row">
                      <span>Mikrofon aç/kapa tuşu</span>
                      <button type="button" id="setting-mute-key" class="keybind-btn">M</button>
+                  </label>
+                  <label class="voice-settings-row">
+                     <span>Mikrofon</span>
+                     <select id="setting-mic-device" class="voice-settings-select"><option value="">Sistem varsayılanı</option></select>
+                  </label>
+                  <label class="voice-settings-row">
+                     <span>Gürültü bastırma</span>
+                     <input type="checkbox" id="setting-noise-suppression" checked>
+                  </label>
+                  <label class="voice-settings-row">
+                     <span>Yankı engelleme</span>
+                     <input type="checkbox" id="setting-echo-cancel" checked>
+                  </label>
+                  <label class="voice-settings-row">
+                     <span>Otomatik ses seviyesi</span>
+                     <input type="checkbox" id="setting-auto-gain" checked>
                   </label>
                   <p class="voice-settings-hint">Bas-Konuş açıkken mikrofon yalnızca tuşa basılı tutulunca açılır.</p>
                </div>

@@ -32,11 +32,25 @@ if (fs.existsSync('.env')) {
 }
 
 // CORS (Güvenlik) İzinleri eklendi
+const ALLOWED_ORIGINS = [
+   ...(process.env.ALLOWED_ORIGINS || '').split(',').map(v => v.trim()).filter(Boolean),
+   process.env.RENDER_EXTERNAL_URL || ''
+].filter(Boolean).map(v => v.replace(/\/+$/, ''));
+
+// Origin başlığı yoksa (aynı origin / sunucu istemcisi) ya da host ile eşleşiyorsa izin ver
+function isOriginAllowed(origin, host) {
+   if (!origin) return true;
+   try {
+      const o = new URL(origin);
+      if (host && o.host === host) return true;
+      if (ALLOWED_ORIGINS.includes(o.origin)) return true;
+      if (!IS_PRODUCTION && (o.hostname === 'localhost' || o.hostname === '127.0.0.1')) return true;
+   } catch (e) { /* geçersiz origin */ }
+   return false;
+}
+
 const io = new Server(server, {
-   cors: {
-      origin: "*",
-      methods: ["GET", "POST"]
-   },
+   allowRequest: (req, cb) => cb(null, isOriginAllowed(req.headers.origin, req.headers.host)),
    maxHttpBufferSize: 1e7 // 10 MB (Görsel ve büyük mesajlar için)
 });
 
@@ -47,7 +61,7 @@ const peerServer = ExpressPeerServer(server, {
    debug: false,
    path: '/',
    alive_timeout: 60000,
-   corsOptions: { origin: '*' }
+   corsOptions: { origin: (origin, cb) => cb(null, isOriginAllowed(origin, null) || !origin) }
 });
 
 peerServer.on('error', (err) => {
@@ -91,64 +105,11 @@ function saveUsers() {
    }
 }
 
-// CRYPTO HELPERS FOR PASSWORDS
-const PBKDF2_ITERATIONS = 120000;
-
-function hashPassword(password) {
-   const salt = crypto.randomBytes(16).toString('hex');
-   const hash = crypto.pbkdf2Sync(password, salt, PBKDF2_ITERATIONS, 64, 'sha512').toString('hex');
-   return `v2$${PBKDF2_ITERATIONS}$${salt}$${hash}`;
-}
-
-function safeEqualStr(a, b) {
-   const ba = Buffer.from(String(a));
-   const bb = Buffer.from(String(b));
-   return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
-}
-
-function verifyPassword(password, storedPassword) {
-   if (!storedPassword || typeof password !== 'string') return false;
-   if (storedPassword.startsWith('v2$')) {
-      const [, iter, salt, hash] = storedPassword.split('$');
-      const verifyHash = crypto.pbkdf2Sync(password, salt, parseInt(iter, 10), 64, 'sha512').toString('hex');
-      return safeEqualStr(hash, verifyHash);
-   }
-   // Eski format (salt:hash, 1000 iterasyon) — mevcut kullanıcılar giriş yapabilsin
-   if (!storedPassword.includes(':')) return false;
-   const [salt, hash] = storedPassword.split(':');
-   const verifyHash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
-   return safeEqualStr(hash, verifyHash);
-}
-
-// PURE NODE.JS JWT SYSTEM (ZERO DEPENDENCIES)
-// JWT_SECRET tanımlı değilse tahmin edilebilir sabit anahtar yerine rastgele (yeniden başlatmada oturumlar düşer) kullan
-const JWT_SECRET = process.env.JWT_SECRET || (() => {
-   console.warn('[GÜVENLİK] JWT_SECRET tanımlı değil! Rastgele geçici anahtar kullanılıyor.');
-   return crypto.randomBytes(48).toString('hex');
-})();
-const IS_PRODUCTION = process.env.NODE_ENV === 'production' || !!process.env.RENDER_EXTERNAL_URL;
+const {
+   IS_PRODUCTION, SESSION_MAX_AGE_SECONDS, hashPassword, verifyPassword,
+   safeEqualStr, generateToken, verifyToken, rateLimit
+} = require('./lib/security');
 const SESSION_COOKIE_NAME = 'lonca_session';
-const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 180; // 180 gün
-
-function generateToken(payload) {
-   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
-   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
-   const signature = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${body}`).digest('base64url');
-   return `${header}.${body}.${signature}`;
-}
-
-function verifyToken(token) {
-   try {
-      const parts = token.split('.');
-      if (parts.length !== 3) return null;
-      const [header, body, signature] = parts;
-      const validSignature = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${body}`).digest('base64url');
-      if (!safeEqualStr(signature, validSignature)) return null;
-      return JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
-   } catch (e) {
-      return null;
-   }
-}
 
 function getRequestToken(req) {
    const authHeader = req.headers.authorization;
@@ -230,20 +191,6 @@ function authenticateToken(req, res, next) {
 }
 
 // GET CURRENT USER (/api/auth/me)
-// Basit bellek içi hız sınırlayıcı (kaba kuvvet denemelerine karşı)
-const rateBuckets = new Map();
-function rateLimit(maxHits, windowMs) {
-   return (req, res, next) => {
-      const key = req.path + '|' + (req.ip || '');
-      const now = Date.now();
-      const b = rateBuckets.get(key);
-      if (!b || b.reset < now) { rateBuckets.set(key, { hits: 1, reset: now + windowMs }); return next(); }
-      b.hits++;
-      if (b.hits > maxHits) return res.status(429).json({ error: 'Çok fazla deneme. Lütfen biraz bekleyin.' });
-      next();
-   };
-}
-setInterval(() => { const n = Date.now(); for (const [k, b] of rateBuckets) if (b.reset < n) rateBuckets.delete(k); }, 10 * 60 * 1000).unref();
 app.use(['/api/auth/login', '/api/auth/register', '/api/auth/forgot-password', '/api/auth/reset-password', '/api/auth/google'], rateLimit(20, 10 * 60 * 1000));
 
 app.get('/api/auth/me', (req, res) => {
@@ -261,11 +208,13 @@ app.get('/api/auth/me', (req, res) => {
       saveUsers();
    }
 
-   // Kullanıcı uygulamayı kullandıkça oturum süresini uzat.
-   setSessionCookie(res, token);
+   // Kullanıcı uygulamayı kullandıkça oturum süresini uzat (yeni exp'li token).
+   const refreshedToken = generateToken({ userId: user.id });
+   setSessionCookie(res, refreshedToken);
 
    res.json({
       success: true,
+      token: refreshedToken,
       user: {
          id: user.id,
          username: user.username,
@@ -1078,7 +1027,8 @@ try {
       pinnedMsgId: { type: String, default: null },
       replyTo: { type: mongoose.Schema.Types.Mixed, default: null },
       reactions: { type: mongoose.Schema.Types.Mixed, default: {} },
-      mentions: { type: [String], default: [] }
+      mentions: { type: [String], default: [] },
+      editedAt: { type: Number, default: null }
    }, { timestamps: true });
 
    MessageModel = mongoose.models.Message || mongoose.model('Message', messageSchema);
@@ -1251,7 +1201,8 @@ async function syncMessagesWithMongo() {
                   pinnedMsgId: doc.pinnedMsgId || null,
                   replyTo: doc.replyTo || null,
                   reactions: doc.reactions || {},
-                  mentions: doc.mentions || []
+                  mentions: doc.mentions || [],
+                  editedAt: doc.editedAt || null
                });
                importedCount++;
             }
@@ -1423,7 +1374,8 @@ function saveMessages(roomId, msgObj) {
             pinnedMsgId: msgObj.pinnedMsgId || null,
             replyTo: msgObj.replyTo || null,
             reactions: msgObj.reactions || {},
-            mentions: msgObj.mentions || []
+            mentions: msgObj.mentions || [],
+            editedAt: msgObj.editedAt || null
          },
          { upsert: true, new: true }
       ).catch(err => {
@@ -1563,6 +1515,7 @@ function buildMessagePayload(msgObj) {
       replyTo: msgObj.replyTo || null,
       reactions: msgObj.reactions || {},
       mentions: msgObj.mentions || [],
+      editedAt: msgObj.editedAt || null,
       timestamp: msgObj.timestamp || Date.now()
    };
 }
@@ -2173,6 +2126,46 @@ io.on('connection', (socket) => {
       }
    });
 
+   // Yazıyor göstergesi
+   socket.on('typing', () => {
+      if (!socket.textRoom || !socket.username) return;
+      const now = Date.now();
+      if (socket._lastTypingAt && now - socket._lastTypingAt < 1500) return;
+      socket._lastTypingAt = now;
+      socket.to('text-' + socket.textRoom).emit('user-typing', { room: socket.textRoom, username: socket.username });
+   });
+
+   // Mesaj düzenleme (yalnızca mesajın sahibi)
+   socket.on('edit-message', ({ msgId, text } = {}) => {
+      if (!msgId || typeof text !== 'string' || !socket.username) return;
+      const newText = text.trim().slice(0, 4000);
+      let found = false;
+      let sample = null;
+      const rooms = [];
+      for (const room in messageHistory) {
+         const m = messageHistory[room].find(x => x.id === msgId);
+         if (!m) continue;
+         if (m.isSystem) return;
+         const isOwner = (m.senderId && m.senderId === socket.userId) || (!m.senderId && m.sender === socket.username);
+         if (!isOwner) return;
+         if (!newText && !m.image) return;
+         if (m.text === newText) return;
+         // Ayna odalarda aynı nesne paylaşılabilir; yine de her kaydı güncelle
+         m.text = newText;
+         m.mentions = extractMentions(newText);
+         m.editedAt = Date.now();
+         sample = m;
+         rooms.push(room);
+         found = true;
+      }
+      if (!found) return;
+      const payload = { id: msgId, text: sample.text, mentions: sample.mentions, editedAt: sample.editedAt };
+      saveMessages(rooms[0], messageHistory[rooms[0]].find(x => x.id === msgId));
+      rooms.forEach(room => {
+         io.to('text-' + room).emit('message-edited', payload);
+      });
+   });
+
    socket.on('react-message', ({ msgId, emoji }) => {
       if (!msgId || !emoji || !socket.username) return;
       const allowed = ['👍', '❤️', '😂', '🔥', '😮', '👏'];
@@ -2338,14 +2331,21 @@ io.on('connection', (socket) => {
 
    // KULLANICI MİKROFON/KULAKLIK KAPATTIĞINDA SUNUCUYU HABERDAR EDEN YENİ EVENT
    socket.on('voice-state-update', (state) => {
-      socket.voiceState = state; // Gelen objeyi kaydet: { mic: false, deaf: false } vb.
+      if (!state || typeof state !== 'object') return;
+      state = { mic: !!state.mic, deaf: !!state.deaf };
+      socket.voiceState = state; // { mic, deaf }: false = kapalı/susturulmuş
 
       if (socket.voiceRoom && voiceRooms[socket.voiceRoom] && voiceRooms[socket.voiceRoom][socket.peerId]) {
          voiceRooms[socket.voiceRoom][socket.peerId].mic = state.mic;
          voiceRooms[socket.voiceRoom][socket.peerId].deaf = state.deaf;
 
-         // Herkese duyur ki listede mute/deaf ikonlarını kırmızı yaksınlar!
-         io.emit('voice-rooms-state', voiceRooms);
+         // Tüm listeyi yeniden göndermek yerine yalnızca değişen kullanıcının durumunu yayınla
+         io.emit('voice-user-state', {
+            room: socket.voiceRoom,
+            peerId: socket.peerId,
+            mic: state.mic,
+            deaf: state.deaf
+         });
       }
    });
 

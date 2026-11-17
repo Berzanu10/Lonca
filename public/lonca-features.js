@@ -155,7 +155,8 @@
                 replyTo: a.replyTo || null,
                 reactions: a.reactions || {},
                 mentions: a.mentions || [],
-                senderId: a.senderId || null
+                senderId: a.senderId || null,
+                editedAt: a.editedAt || null
             };
         }
         return {
@@ -234,6 +235,12 @@
                 span.appendChild(formatMessageTextWithMentions(msg));
                 textWrapper.appendChild(span);
             }
+            if (info.editedAt) {
+                const tag = document.createElement('small');
+                tag.className = 'message-edited-tag';
+                tag.textContent = ' (düzenlendi)';
+                textWrapper.appendChild(tag);
+            }
         }
         contentDiv.appendChild(textWrapper);
 
@@ -277,6 +284,17 @@
                 setPendingReply({ id: msgId, sender, text: msg, image });
             };
             hover.appendChild(replyBtn);
+            if (sender === myUsername) {
+                const editBtn = document.createElement('button');
+                editBtn.type = 'button';
+                editBtn.textContent = '✏';
+                editBtn.title = 'Düzenle';
+                editBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    window.startEditMessage(msgId);
+                };
+                hover.appendChild(editBtn);
+            }
             div.appendChild(hover);
         }
 
@@ -319,11 +337,171 @@
         if (el) renderMessageReactions(el, msgId, reactions || {});
     });
 
+    // ---- Okunmamış mesaj rozeti: kalıcı + sekme başlığında toplam ----
+    const BASE_TITLE = document.title;
+    let hiddenCurrentRoomCount = 0;
+    try {
+        const saved = JSON.parse(localStorage.getItem('loncaUnread') || '{}');
+        Object.keys(saved).forEach(k => { if (saved[k] > 0) channelUnread[k] = saved[k]; });
+    } catch (e) {}
+
+    window.persistUnread = function persistUnread() {
+        try {
+            const clean = {};
+            Object.keys(channelUnread).forEach(k => { if (channelUnread[k] > 0) clean[k] = channelUnread[k]; });
+            localStorage.setItem('loncaUnread', JSON.stringify(clean));
+        } catch (e) {}
+        refreshTitleBadge();
+    };
+
+    function refreshTitleBadge() {
+        const total = Object.values(channelUnread).reduce((a, b) => a + (b || 0), 0) + hiddenCurrentRoomCount;
+        document.title = total > 0 ? '(' + (total > 99 ? '99+' : total) + ') ' + BASE_TITLE : BASE_TITLE;
+    }
+
+    window.addEventListener('focus', () => { hiddenCurrentRoomCount = 0; refreshTitleBadge(); });
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) { hiddenCurrentRoomCount = 0; refreshTitleBadge(); }
+    });
+    refreshTitleBadge();
+
     socket.on('channel-activity', ({ roomId, mentions, sender }) => {
-        if (!roomId || roomId === currentTextRoom) return;
+        if (!roomId) return;
         if (sender && sender === myUsername) return;
+        if (roomId === currentTextRoom) {
+            // Açık kanal ama sekme arka plandaysa başlıkta göster
+            if (document.hidden) { hiddenCurrentRoomCount++; refreshTitleBadge(); }
+            return;
+        }
         channelUnread[roomId] = (channelUnread[roomId] || 0) + 1;
+        persistUnread();
         updateChannelUnreadBadges();
+    });
+
+    // ---- Yazıyor göstergesi ----
+    const typers = new Map();
+    let lastTypingEmit = 0;
+
+    function renderTyping() {
+        const el = document.getElementById('typing-indicator');
+        if (!el) return;
+        const names = [...typers.keys()];
+        if (!names.length) { el.textContent = ''; el.style.visibility = 'hidden'; return; }
+        let text;
+        if (names.length === 1) text = names[0] + ' yazıyor…';
+        else if (names.length === 2) text = names[0] + ' ve ' + names[1] + ' yazıyor…';
+        else text = 'Birkaç kişi yazıyor…';
+        el.textContent = text;
+        el.style.visibility = 'visible';
+    }
+
+    window.clearTyping = function clearTyping() {
+        typers.forEach(t => clearTimeout(t));
+        typers.clear();
+        renderTyping();
+    };
+
+    socket.on('user-typing', ({ room, username }) => {
+        if (!username || username === myUsername || room !== currentTextRoom) return;
+        clearTimeout(typers.get(username));
+        typers.set(username, setTimeout(() => { typers.delete(username); renderTyping(); }, 4000));
+        renderTyping();
+    });
+
+    socket.on('create-message', (message, senderName) => {
+        const sender = (message && typeof message === 'object') ? message.sender : senderName;
+        if (sender && typers.has(sender)) {
+            clearTimeout(typers.get(sender));
+            typers.delete(sender);
+            renderTyping();
+        }
+    });
+
+    if (typeof chatInput !== 'undefined' && chatInput) {
+        chatInput.addEventListener('input', () => {
+            if (!chatInput.value.trim()) return;
+            const now = Date.now();
+            if (now - lastTypingEmit > 2000) {
+                lastTypingEmit = now;
+                socket.emit('typing');
+            }
+        });
+        // Boş kutuda ↑ : son mesajını düzenle
+        chatInput.addEventListener('keydown', (e) => {
+            if (e.key !== 'ArrowUp' || chatInput.value) return;
+            const mine = activeRoomMessages.filter(m => !m.isSystem && m.sender === myUsername);
+            if (!mine.length) return;
+            e.preventDefault();
+            window.startEditMessage(mine[mine.length - 1].id);
+        });
+    }
+
+    // ---- Mesaj düzenleme ----
+    window.startEditMessage = function startEditMessage(msgId) {
+        const el = document.querySelector('.message[data-id="' + msgId + '"]');
+        const msgData = activeRoomMessages.find(m => m.id === msgId);
+        if (!el || !msgData || msgData.isSystem || msgData.sender !== myUsername) return;
+        if (el.querySelector('.message-edit-box')) return;
+        const wrapper = el.querySelector('.message-text-wrapper');
+        if (!wrapper) return;
+
+        const box = document.createElement('div');
+        box.className = 'message-edit-box';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'message-edit-input';
+        input.value = msgData.text || '';
+        input.maxLength = 4000;
+        const hint = document.createElement('div');
+        hint.className = 'message-edit-hint';
+        hint.textContent = 'Esc ile iptal • Enter ile kaydet';
+        box.appendChild(input);
+        box.appendChild(hint);
+        wrapper.style.display = 'none';
+        wrapper.parentNode.insertBefore(box, wrapper.nextSibling);
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+
+        const close = () => { box.remove(); wrapper.style.display = ''; };
+        input.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+            if (e.key === 'Escape') { close(); }
+            else if (e.key === 'Enter') {
+                e.preventDefault();
+                const val = input.value.trim();
+                if (!val && !msgData.image) return;
+                if (val !== (msgData.text || '')) socket.emit('edit-message', { msgId, text: val });
+                close();
+            }
+        });
+        input.addEventListener('click', (e) => e.stopPropagation());
+    };
+
+    socket.on('message-edited', ({ id, text, mentions, editedAt }) => {
+        const msgData = activeRoomMessages.find(m => m.id === id);
+        if (msgData) { msgData.text = text; msgData.mentions = mentions || []; msgData.editedAt = editedAt; }
+        const el = document.querySelector('.message[data-id="' + id + '"]');
+        if (el) {
+            const wrapper = el.querySelector('.message-text-wrapper');
+            if (wrapper) {
+                let span = wrapper.querySelector(':scope > span');
+                if (!span) {
+                    span = document.createElement('span');
+                    wrapper.appendChild(document.createTextNode(' '));
+                    wrapper.appendChild(span);
+                }
+                span.innerHTML = '';
+                span.appendChild(formatMessageTextWithMentions(text));
+                let tag = wrapper.querySelector('.message-edited-tag');
+                if (!tag) {
+                    tag = document.createElement('small');
+                    tag.className = 'message-edited-tag';
+                    tag.textContent = ' (düzenlendi)';
+                    wrapper.appendChild(tag);
+                }
+            }
+        }
+        if (typeof updatePinnedMessagesBanner === 'function') updatePinnedMessagesBanner();
     });
 
     // Chat form submit'i replyTo eklemek için yeniden bağla

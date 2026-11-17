@@ -1,2 +1,8 @@
 .env
 node_modules/
+# Kullanıcı verileri (MongoDB / çalışma zamanı) repoda tutulmaz
+users.json
+messages.json
+deleted_messages.json
+seen_users.json
+friends.json

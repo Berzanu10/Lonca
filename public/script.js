@@ -108,13 +108,34 @@ let prevMicMuted = false;
 // Sesli sohbet, müzik yerine insan konuşmasına göre ayarlanır.
 // Değerler ideal tutulur; zorunlu sampleRate/latency bazı tarayıcılarda
 // izin penceresini açmadan isteği reddeder.
-const VOICE_AUDIO_CONSTRAINTS = {
-    echoCancellation: { ideal: true },
-    noiseSuppression: { ideal: true },
-    autoGainControl: { ideal: true },
-    channelCount: { ideal: 1 },
-    sampleRate: { ideal: 48000 }
-};
+const AUDIO_SETTINGS_KEY = 'loncaAudioSettings';
+function loadAudioSettings() {
+    const defaults = { echoCancellation: true, noiseSuppression: true, autoGainControl: true, deviceId: '' };
+    try {
+        const raw = localStorage.getItem(AUDIO_SETTINGS_KEY);
+        if (raw) return Object.assign(defaults, JSON.parse(raw));
+    } catch (e) {}
+    return defaults;
+}
+let audioSettings = loadAudioSettings();
+
+const VOICE_AUDIO_CONSTRAINTS = {};
+function syncVoiceAudioConstraints() {
+    Object.keys(VOICE_AUDIO_CONSTRAINTS).forEach(k => delete VOICE_AUDIO_CONSTRAINTS[k]);
+    Object.assign(VOICE_AUDIO_CONSTRAINTS, {
+        echoCancellation: { ideal: !!audioSettings.echoCancellation },
+        noiseSuppression: { ideal: !!audioSettings.noiseSuppression },
+        autoGainControl: { ideal: !!audioSettings.autoGainControl },
+        channelCount: { ideal: 1 },
+        sampleRate: { ideal: 48000 }
+    });
+}
+syncVoiceAudioConstraints();
+
+function saveAudioSettings() {
+    try { localStorage.setItem(AUDIO_SETTINGS_KEY, JSON.stringify(audioSettings)); } catch (e) {}
+    syncVoiceAudioConstraints();
+}
 
 const MIC_GRANT_COOKIE = 'lonca_mic';
 
@@ -155,7 +176,8 @@ async function getVoiceStream() {
         throw err;
     }
 
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    const micRequest = audioSettings.deviceId ? { deviceId: { ideal: audioSettings.deviceId } } : true;
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: micRequest, video: false });
     rememberMicGrant();
 
     const track = stream.getAudioTracks()[0];
@@ -170,6 +192,90 @@ async function getVoiceStream() {
     attachTrackEndedRecovery(stream);
     return stream;
 }
+
+// Ses ayarı değişince (mikrofon, gürültü bastırma...) odadan çıkmadan yeni akışa geç
+async function applyAudioSettingsLive() {
+    if (!currentVoiceRoom || !localAudioStream) return;
+    const oldStream = localAudioStream;
+    oldStream.getAudioTracks().forEach(t => { t.onended = null; });
+    try {
+        const newStream = await getVoiceStream();
+        const newTrack = newStream.getAudioTracks()[0];
+        localAudioStream = newStream;
+        if (newTrack) {
+            for (const pId in voiceCalls) {
+                try {
+                    const pc = voiceCalls[pId].peerConnection;
+                    const sender = pc && pc.getSenders().find(s => s.track && s.track.kind === 'audio');
+                    if (sender) await sender.replaceTrack(newTrack);
+                } catch (e) { console.warn('[Audio] replaceTrack uyarısı:', e); }
+            }
+        }
+        stopMonitor(myPeerId);
+        monitorSpeech(localAudioStream, myPeerId);
+        oldStream.getTracks().forEach(t => { try { t.stop(); } catch (e) {} });
+        applyHardwareStates();
+    } catch (e) {
+        console.warn('[Audio] Yeni ses ayarı uygulanamadı:', e);
+        attachTrackEndedRecovery(oldStream);
+        showCustomAlert('Mikrofon', micErrorMessage(e));
+    }
+}
+
+async function populateMicDevices() {
+    const select = document.getElementById('setting-mic-device');
+    if (!select || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+    try {
+        const devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audioinput');
+        select.innerHTML = '';
+        const def = document.createElement('option');
+        def.value = '';
+        def.textContent = 'Sistem varsayılanı';
+        select.appendChild(def);
+        devices.forEach((d, i) => {
+            if (!d.deviceId || d.deviceId === 'default' || d.deviceId === 'communications') return;
+            const o = document.createElement('option');
+            o.value = d.deviceId;
+            o.textContent = d.label || ('Mikrofon ' + (i + 1));
+            select.appendChild(o);
+        });
+        select.value = audioSettings.deviceId || '';
+        if (select.value !== (audioSettings.deviceId || '')) select.value = '';
+    } catch (e) {}
+}
+
+function bindAudioSettingsUI() {
+    const map = {
+        'setting-noise-suppression': 'noiseSuppression',
+        'setting-echo-cancel': 'echoCancellation',
+        'setting-auto-gain': 'autoGainControl'
+    };
+    Object.keys(map).forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.checked = !!audioSettings[map[id]];
+        el.addEventListener('change', () => {
+            audioSettings[map[id]] = el.checked;
+            saveAudioSettings();
+            applyAudioSettingsLive();
+        });
+    });
+    const select = document.getElementById('setting-mic-device');
+    if (select) {
+        select.addEventListener('change', () => {
+            audioSettings.deviceId = select.value;
+            saveAudioSettings();
+            applyAudioSettingsLive();
+        });
+        select.addEventListener('focus', populateMicDevices);
+        populateMicDevices();
+    }
+    if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+        navigator.mediaDevices.addEventListener('devicechange', populateMicDevices);
+    }
+}
+document.addEventListener('DOMContentLoaded', bindAudioSettingsUI);
+if (document.readyState !== 'loading') bindAudioSettingsUI();
 
 // Kulaklık/Mikrofon takıp çıkarma veya Bluetooth kopmasında otomatik toparlanma
 function attachTrackEndedRecovery(stream) {
@@ -1173,7 +1279,28 @@ if (profileSaveBtn) {
                 localStorage.setItem('bio', data.user.bio || '');
                 localStorage.removeItem('adminToken');
                 profileModal.style.display = 'none';
-                location.reload();
+                if (currentVoiceRoom) {
+                    // Sesli odadayken sayfayı yenileme: bağlantı kopmasın, değerleri yerinde güncelle
+                    myUsername = data.user.username;
+                    myAvatar = data.user.avatar || '';
+                    if (displayMyUsername) displayMyUsername.textContent = myUsername;
+                    const myAvEl = document.getElementById('my-avatar');
+                    if (myAvEl) {
+                        if (myAvatar) {
+                            myAvEl.style.backgroundImage = `url(${myAvatar})`;
+                            myAvEl.style.backgroundSize = 'cover';
+                            myAvEl.style.color = 'transparent';
+                            myAvEl.textContent = '';
+                        } else {
+                            myAvEl.style.backgroundImage = '';
+                            myAvEl.textContent = (myUsername || '?').charAt(0).toUpperCase();
+                            myAvEl.style.color = '';
+                        }
+                    }
+                    socket.emit('register', myPeerId, myUsername, myUserId, myAvatar, myAdminToken, localStorage.getItem('sessionToken'));
+                } else {
+                    location.reload();
+                }
             } else {
                 showCustomAlert("Hata", data.error || "Profil güncellenemedi.");
             }
@@ -1561,6 +1688,8 @@ function joinTextRoom(room) {
     currentTextRoom = room;
     localStorage.setItem('lastActiveTextRoom', room);
     channelUnread[room] = 0;
+    if (typeof window.persistUnread === 'function') window.persistUnread();
+    if (typeof window.clearTyping === 'function') window.clearTyping();
     if (typeof updateChannelUnreadBadges === 'function') updateChannelUnreadBadges();
     messages.innerHTML = '';
     if (typeof clearPendingReply === 'function') clearPendingReply();
@@ -1676,7 +1805,8 @@ socket.on('chat-history', (history) => {
         replyTo: m.replyTo || null,
         reactions: m.reactions || {},
         mentions: m.mentions || [],
-        senderId: m.senderId || null
+        senderId: m.senderId || null,
+        editedAt: m.editedAt || null
     }));
     activeRoomMessages.forEach(msg => {
         (window.appendMessage || appendMessage)(msg.sender, msg.text, msg.id, msg.isSystem, msg.pinned, msg.image, msg);
@@ -1839,6 +1969,17 @@ function openContextMenu(messageDiv, msgId, sender, isSystem) {
             closeAllContextMenus();
         };
         menu.appendChild(pinBtn);
+
+        if (sender === myUsername && typeof window.startEditMessage === 'function') {
+            const editBtn = document.createElement('button');
+            editBtn.className = 'context-menu-item';
+            editBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 6px;"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg> Düzenle`;
+            editBtn.onclick = () => {
+                closeAllContextMenus();
+                window.startEditMessage(msgId);
+            };
+            menu.appendChild(editBtn);
+        }
     }
 
     // Select option
@@ -2341,6 +2482,22 @@ document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
         checkAndHealVoice();
     }
+});
+
+socket.on('voice-user-state', ({ room, peerId, mic, deaf } = {}) => {
+    if (!room || !peerId) return;
+    const roomState = latestVoiceRoomsState[room];
+    if (roomState && roomState[peerId]) {
+        roomState[peerId].mic = mic;
+        roomState[peerId].deaf = deaf;
+    }
+    const ul = document.getElementById('voice-users-' + room);
+    const li = ul && ul.querySelector('li[data-peer-id="' + peerId + '"]');
+    if (!li) return;
+    const mi = li.querySelector('.mic-state');
+    const di = li.querySelector('.deaf-state');
+    if (mi) mi.classList.toggle('strikethrough-icon', mic === false);
+    if (di) di.classList.toggle('strikethrough-icon', deaf === false);
 });
 
 socket.on('voice-rooms-state', (voiceRoomsData) => {
